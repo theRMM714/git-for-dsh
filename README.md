@@ -132,6 +132,8 @@ dsh plugin --profile <profile> update git-for-dsh
 
 > 从 GitHub 安装/更新时，shell 里要能访问 github.com。若你的网络需要代理，先 `export HTTPS_PROXY=http://127.0.0.1:<端口>`。
 
+这两条命令都是**实测过**的（pnpm 12.4.2）：git 直装在全新 profile 里一次成功，没有出现 `allowBuilds` 放行要求 —— 因为 `lib/` 已随包提供，安装路径上不存在构建脚本。
+
 安装做的事（`dsh plugin` 的职责）：pnpm 装包 → 把包加进 profile 的依赖 → **把声明了 `dsh.bundle` 的依赖并入 `dsh.profile.bundles` 层栈**。装载的行来自本包自带的 `cordis.patch.yml`：
 
 ```yaml
