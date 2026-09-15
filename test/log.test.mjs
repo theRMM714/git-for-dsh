@@ -94,6 +94,21 @@ describe('the log handle', () => {
     assert.equal(lines(second).length, 1)
   })
 
+  it('reports its own failure, once, when it cannot write', () => {
+    // The most ironic possible hole: the instrument for observing failures failing
+    // unobserved. It now tells its caller — once per distinct message, so a broken log does
+    // not turn every tool call into console noise.
+    const reported = []
+    const log = createDiagnosticLog(
+      () => ({ enabled: true, path: join(scratch, 'missing-dir', 'x.log') }),
+      (message) => reported.push(message),
+    )
+    log.line('activate', {})
+    log.line('activate', {})
+    assert.equal(reported.length, 1)
+    assert.match(reported[0], /cannot write/)
+  })
+
   it('never throws when the destination is unusable', () => {
     // A logging failure must not fail the call it was describing.
     const log = createDiagnosticLog(() => ({ enabled: true, path: join(scratch, 'missing-dir', 'x.log') }))

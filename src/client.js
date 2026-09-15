@@ -1033,6 +1033,7 @@ window.__ModuleLoader__.load({
                           ? '读取失败：' + logView.body.error
                           : (logView.body.cleared === true ? '已清空 ' : '') + String(logView.body.lines.length) + ' 行'
                             + (logView.body.truncated === true ? '（只显示末尾）' : '')
+                            + (logView.body.exists === false ? '；文件还不存在（还没写过日志，或写入失败了）' : '')
                             + (logView.body.enabled === false ? '；日志当前是关闭的' : ''),
                 ),
               ),
