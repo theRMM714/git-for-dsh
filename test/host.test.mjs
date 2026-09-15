@@ -10,10 +10,12 @@
  * @module git-for-dsh/test/host.test
  */
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, it } from 'node:test'
+import { after, describe, it } from 'node:test'
 import { apply, applyUnguarded, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
 
@@ -769,6 +771,55 @@ describe('host plugin: the form decides approval', () => {
     await definition.execute({ ...CALL, argv: ['branch', '-a'] }, execution())
     assert.equal(recorded.approvals.length, 0, 'listing changes nothing')
     assert.equal(executed(recorded).length, 1)
+  })
+})
+
+describe('host plugin: the audit is cached by repository state', () => {
+  it('reuses an audit until the configuration changes', async () => {
+    // A process start on WSL costs tens of milliseconds, and the audit is a second one per
+    // git call. The key covers the directory, the policy and the config's stamp, so reuse
+    // can never hide a changed configuration.
+    const repo = mkdtempSync(join(tmpdir(), 'audit-cache-'))
+    mkdirSync(join(repo, '.git'), { recursive: true })
+    const config = join(repo, '.git', 'config')
+    writeFileSync(config, '[core]\n\trepositoryformatversion = 0\n')
+    after(() => rmSync(repo, { recursive: true, force: true }))
+
+    const { definition, recorded } = mount({ configKeys: ['core.fsmonitor'] })
+    const audits = () => recorded.runs.filter((spec) => AUDIT_COMMAND.test(spec.command)).length
+
+    // This key names a program, so every call is refused — and that refusal proves the
+    // verdict came from the cached keys rather than being skipped.
+    await assert.rejects(
+      () => definition.execute({ ...CALL, argv: ['status'], workdir: repo }, execution()),
+      /core\.fsmonitor/,
+    )
+    assert.equal(audits(), 1)
+
+    await assert.rejects(
+      () => definition.execute({ ...CALL, argv: ['status'], workdir: repo }, execution()),
+      /core\.fsmonitor/,
+    )
+    assert.equal(audits(), 1, 'the second call reused the cached audit')
+
+    writeFileSync(config, '[core]\n\trepositoryformatversion = 0\n\tfsmonitor = true\n')
+    await assert.rejects(
+      () => definition.execute({ ...CALL, argv: ['status'], workdir: repo }, execution()),
+      /core\.fsmonitor/,
+    )
+    assert.equal(audits(), 2, 'a changed configuration forces a fresh audit')
+  })
+
+  it('does not cache a directory with no configuration to watch', async () => {
+    const { definition, recorded } = mount({ configKeys: ['core.fsmonitor'] })
+    const audits = () => recorded.runs.filter((spec) => AUDIT_COMMAND.test(spec.command)).length
+    for (let index = 0; index < 2; index += 1) {
+      await assert.rejects(
+        () => definition.execute({ ...CALL, argv: ['status'], workdir: '/nonexistent-repo' }, execution()),
+        /core\.fsmonitor/,
+      )
+    }
+    assert.equal(audits(), 2, 'an unwatchable directory is audited every time')
   })
 })
 
