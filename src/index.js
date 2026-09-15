@@ -665,6 +665,54 @@ const WINDOWS_SSH_LAYOUTS = Object.freeze([
   'Program Files/Git/usr/bin/ssh.exe',
 ])
 
+/**
+ * Translate an absolute Windows path into the path WSL sees.
+ *
+ * `C:\\Windows\\System32\\OpenSSH\\ssh.exe` becomes
+ * `<mountRoot>/Windows/System32/OpenSSH/ssh.exe`, using whichever mount root exists.
+ *
+ * @param windowsPath - a path as Windows writes it.
+ * @returns the WSL path, or undefined when the drive has no mount here.
+ */
+function toWslPath(windowsPath) {
+  const match = /^([a-zA-Z]):[\\/](.*)$/.exec(windowsPath.trim())
+  if (match === null) return undefined
+  const drive = match[1].toLowerCase()
+  const rest = match[2].replace(/\\/g, '/')
+  for (const root of windowsMountRoots()) {
+    if (root.toLowerCase().endsWith(`/${drive}`) && rest.length > 0) return `${root}/${rest}`
+  }
+  // The drive is not mounted at a root we know; the caller reports the path as it came.
+  return undefined
+}
+
+/**
+ * Ask Windows where its ssh is.
+ *
+ * @returns the paths Windows reports, as WSL paths where possible.
+ */
+function windowsWhereSsh() {
+  const found = []
+  for (const command of ['where.exe', '/mnt/c/Windows/System32/where.exe']) {
+    let result
+    try {
+      result = spawnSync(command, ['ssh'], { encoding: 'utf8', timeout: 5000 })
+    } catch {
+      continue
+    }
+    if (result === undefined || result.status !== 0) continue
+    for (const line of String(result.stdout ?? '').split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (trimmed.length === 0) continue
+      const translated = toWslPath(trimmed)
+      if (translated === undefined) continue
+      if (!found.includes(translated)) found.push(translated)
+    }
+    if (found.length > 0) break
+  }
+  return found
+}
+
 /** Where Windows drives are mounted, by default and by common alternatives. */
 function windowsMountRoots() {
   const roots = ['/mnt/c', '/c']
@@ -700,6 +748,8 @@ function sshCandidatePaths() {
   for (const root of windowsMountRoots()) {
     for (const layout of WINDOWS_SSH_LAYOUTS) add(`${root}/${layout}`)
   }
+  // Whatever the enumeration missed, Windows itself can name.
+  for (const candidate of windowsWhereSsh()) add(candidate)
   return found
 }
 
