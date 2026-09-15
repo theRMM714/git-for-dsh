@@ -404,16 +404,30 @@ describe('enforced configuration pins the program-naming keys', () => {
     assert.equal(pinned.get('credential.helper'), '')
   })
 
+  it('keeps a Windows path usable through the shell that parses it', () => {
+    // The reported failure: an unquoted backslash path lost every separator to shell
+    // escaping and git answered "command not found" for C:WindowsSystem32OpenSSHssh.exe.
+    const env = buildEnv({ sshCommand: 'C:\\Windows\\System32\\OpenSSH\\ssh.exe' })
+    assert.match(env.GIT_SSH_COMMAND, /^"C:\/Windows\/System32\/OpenSSH\/ssh\.exe" /)
+    assert.ok(!env.GIT_SSH_COMMAND.includes('\\'), 'no backslash survives into the command')
+  })
+
+  it('quotes a path with a space, whatever the platform', () => {
+    // A macOS install under /Applications, or Git for Windows under Program Files.
+    const env = buildEnv({ sshCommand: '/Applications/Some App/bin/ssh' })
+    assert.match(env.GIT_SSH_COMMAND, /^"\/Applications\/Some App\/bin\/ssh" /)
+  })
+
   it('pins the ssh program through the ENVIRONMENT instead', () => {
     // `core.sshCommand=false` made SSH impossible, so a repository offering only an SSH
     // remote had no route at all. GIT_SSH_COMMAND outranks every config file, which is
     // the same protection with SSH still usable — and it is non-interactive, because the
     // tool's GIT_TERMINAL_PROMPT does not cover ssh.
     const env = buildEnv({ sshCommand: '/opt/ssh' })
-    assert.equal(env.GIT_SSH_COMMAND, '/opt/ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new')
+    assert.equal(env.GIT_SSH_COMMAND, '"/opt/ssh" -o BatchMode=yes -o StrictHostKeyChecking=accept-new')
     assert.equal(ENFORCED_CONFIG.some((pair) => pair.key === 'core.sshCommand'), false)
     // A blank setting falls back rather than pinning an empty program.
-    assert.match(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, /^\/usr\/bin\/ssh /)
+    assert.match(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, /^"\/usr\/bin\/ssh" /)
   })
 })
 

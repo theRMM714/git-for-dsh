@@ -153,6 +153,17 @@
 
 两档「拒绝」的差别只在**判定宽度**：宽匹配对内容里出现 git 的任何调用都拒（含「只是提到」），`restrict` 只在命令位置判（不误伤，但可能漏掉生僻写法）。默认宽匹配，因为漏掉一次真实调用比误拒一次更糟；同时也把 `restrict` 明确提供给「命令里经常出现 git 字样」的使用者，因为那是真实且常见的需求（内容级检查的必然代价见 PITFALLS 34）。
 
+### 决策：ssh 程序路径走 `GIT_SSH_COMMAND`，用正斜杠并始终加引号
+
+`GIT_SSH_COMMAND` **会经 shell 解析**（Git for Windows 用 bundle 里的 `sh.exe`），所以路径必须能活着穿过一层 shell。两条防线，各自覆盖不同的失败：
+
+1. **Windows 路径转正斜杠** —— Windows 全线接受正斜杠，而没有任何 shell 对它另有解释，因此路径能穿过任何解析器。这不是理论问题：未加引号时，`C:\Windows\System32\OpenSSH\ssh.exe` 的每个反斜杠都被 shell 当作转义吃掉，git 收到 `C:WindowsSystem32OpenSSHssh.exe` 并报 `command not found`。
+2. **始终加引号** —— POSIX 双引号内反斜杠是字面量，因此这一步既保护反斜杠，也保护含空格的路径（macOS 的 `/Applications/…`、Windows 的 `Program Files\…`）。早先只在"含空格"时加引号，正是这个路径没能被保护到的原因。
+
+**判断依据是路径的形态（`C:` 开头），而不是宿主平台**：这样在 Linux 上构建时遇到 Windows 路径同样会被修正，规则也才可以在任何平台上被测试。
+
+**为什么不改用 `GIT_SSH` + `GIT_SSH_VARIANT=ssh`**：`GIT_SSH` 是纯路径、不经 shell，看起来更简单，但它**不允许带参数**，我们就传不了 `-o BatchMode=yes`（防止 ssh 卡在交互提示）与 `-o StrictHostKeyChecking=accept-new`（首次连接自动信任）。要保住这两项就得再生成一个 wrapper 脚本，多一个文件、多一层平台差异（Windows 的 `.cmd` 不能被直接 spawn）。除非将来要支持 `plink`/PuTTY 这类变体（那需要 `GIT_SSH_VARIANT` 与不同的参数语义），否则不换。
+
 ### 决策：脚本检查是独立三档，不再跟随「原生 git」档位
 
 它原先是一个布尔值 `scanScripts`，而**判多宽**借用「原生 git」档位：`deny`/`ask` 下按宽匹配，`restrict` 下按命令位置判。结果是同一个设置在不同档位下含义不同，使用者无法直接表达"我要严格"或"我要不误伤"。
