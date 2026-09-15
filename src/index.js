@@ -211,8 +211,8 @@ export const Config = z.object({
    */
   heartbeat: z
     .boolean()
-    .default(true)
-    .description('Write a heartbeat line every 5 seconds, naming any call that is stuck in flight and for how long. Without it a stall that begins while idle is indistinguishable from one that begins inside a call.'),
+    .default(false)
+    .description('Optional. A heartbeat line every 5 seconds, naming any call stuck in flight and for how long. It was what located a hang inside a call; turn it on when investigating one, off otherwise.'),
   /** The paths the guard protects. */
   protectedPaths: z
     .array(z.string())
@@ -268,7 +268,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   pathGuardPolicy: DEFAULT_GUARD_POLICY,
   protectedPaths: DEFAULT_PROTECTED_PATHS,
   scanScripts: true,
-  heartbeat: true,
+  heartbeat: false,
   sshCommand: DEFAULT_SSH_COMMAND,
   pluginEnabled: true,
   logEnabled: true,
@@ -474,7 +474,7 @@ function normalizePolicy(value) {
       ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
       : [...DEFAULT_PROTECTED_PATHS],
     scanScripts: value?.scanScripts !== false,
-    heartbeat: value?.heartbeat !== false,
+    heartbeat: value?.heartbeat === true,
     sshCommand: typeof value?.sshCommand === 'string' && value.sshCommand.trim().length > 0
       ? value.sshCommand
       : DEFAULT_SSH_COMMAND,

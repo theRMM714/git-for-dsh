@@ -126,7 +126,7 @@ function serializeCatalog() {
       pathGuardPolicy: DEFAULT_GUARD_POLICY,
       protectedPaths: [...DEFAULT_PROTECTED_PATHS],
       scanScripts: true,
-      heartbeat: true,
+      heartbeat: false,
       sshCommand: DEFAULT_SSH_COMMAND,
       pluginEnabled: true,
       logEnabled: true,

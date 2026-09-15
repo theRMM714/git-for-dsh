@@ -291,7 +291,7 @@ window.__ModuleLoader__.load({
             nativeGitPolicy: CATALOG.defaults.nativeGitPolicy,
             pluginEnabled: CATALOG.defaults.pluginEnabled !== false,
             logEnabled: CATALOG.defaults.logEnabled !== false,
-            heartbeat: CATALOG.defaults.heartbeat !== false,
+            heartbeat: CATALOG.defaults.heartbeat === true,
             logPath: CATALOG.defaults.logPath,
             scanScripts: CATALOG.defaults.scanScripts !== false,
             sshCommand: CATALOG.defaults.sshCommand,
@@ -315,7 +315,7 @@ window.__ModuleLoader__.load({
           // silently replaced a valid choice with the default.
           pluginEnabled: section.pluginEnabled !== false,
           logEnabled: section.logEnabled !== false,
-          heartbeat: section.heartbeat !== false,
+          heartbeat: section.heartbeat === true,
           logPath: typeof section.logPath === 'string' ? section.logPath : CATALOG.defaults.logPath,
           scanScripts: section.scanScripts !== false,
           sshCommand: typeof section.sshCommand === 'string' && section.sshCommand.length > 0
@@ -989,9 +989,9 @@ window.__ModuleLoader__.load({
               ),
               option(
                 'heartbeat',
-                value.heartbeat !== false,
+                value.heartbeat === true,
                 '心跳行',
-                '每 5 秒写一行，并报出"当前有哪个调用卡在半途、卡了多久"。没有它，卡死在闲置时开始和在调用中开始，在日志里长得一模一样。',
+                '默认关闭。开启后每 5 秒写一行，并报出"当前有哪个调用卡在半途、卡了多久"——调查卡死时打开它，平时关着，免得日志被心跳填满。',
               ),
               row(
                 '日志路径',
