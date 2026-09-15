@@ -20,7 +20,8 @@
     "scripts/**/*.mjs",
     "cordis.patch.yml",
     "README.md",
-    "PITFALLS.md"
+    "PITFALLS.md",
+    "DESIGN.md"
   ],
   "dsh": {
     "bundle": {
