@@ -17,9 +17,15 @@
     "lib/**/*.js",
     "src/**/*.js",
     "scripts/**/*.mjs",
-    "README.md"
+    "cordis.patch.yml",
+    "README.md",
+    "PITFALLS.md",
+    "AGENT.md"
   ],
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [

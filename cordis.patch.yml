@@ -1,0 +1,18 @@
+# The bundle patch: mounting this plugin is this file's whole job.
+#
+# A package that declares `dsh.bundle.patch` joins a profile's layer stack when it is
+# installed, so `dsh plugin --profile <name> add <spec>` both installs the package AND
+# loads these rows — no hand-editing of the profile's own cordis.patch.yml. Rows are
+# addressed by id across layers, and the user's profile patch is applied last, so a user
+# who restates this row overrides it rather than colliding with it.
+#
+# `insert` is the only action a patch layer performs.
+
+- insert:
+    # The development brake: with DSH_GIT_TOOL_DISABLED=1 the row does not load, so a
+    # broken plugin costs one environment variable instead of a file edit. It covers
+    # only THIS row — the Host half contains its own failures and logs them, and the
+    # Client half degrades the page rather than failing the plugin load.
+    - id: tool-git
+      name: dsh-plugin-git-tool
+      disabled: !!js process.env.DSH_GIT_TOOL_DISABLED === '1'
