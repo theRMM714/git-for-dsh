@@ -24,7 +24,10 @@ import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
  */
 function fakeContext(options = {}) {
   const recorded = { runs: [], approvals: [], sections: [], writes: [], starts: [], listeners: [], routes: [], requestedWorkdir: undefined }
-  let settingsValue = options.settings ?? { ...DEFAULT_CONFIG }
+  // Diagnostics off by default in tests: the log's default path is the operator's real
+  // file, and the heartbeat writes to it on a timer — which is how a test run once put 60
+  // heartbeat lines into their log. A test that wants either passes it explicitly.
+  let settingsValue = options.settings ?? { ...DEFAULT_CONFIG, logEnabled: false, heartbeat: false }
   const listeners = new Set()
   // Mirrors the REAL host-side SettingsScope: get/watch/update/replace. A
   // fixture with subscribe()/set() would let a bug pass, because the settings

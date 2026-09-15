@@ -200,6 +200,18 @@ export const Config = z.object({
     .string()
     .default('')
     .description('Log destination. Empty uses the default path shown on the settings page.'),
+  /**
+   * Whether to write a heartbeat line every few seconds.
+   *
+   * Nothing else writes the log while the harness is idle, so without this every stall
+   * looks like it was caused by whatever was logged last. The line carries the call that
+   * has been open and for how long, which is what separates "wedged inside a call" from
+   * "wedged while idle".
+   */
+  heartbeat: z
+    .boolean()
+    .default(true)
+    .description('Write a heartbeat line every 5 seconds, naming any call that is stuck in flight and for how long. Without it a stall that begins while idle is indistinguishable from one that begins inside a call.'),
   /** The paths the guard protects. */
   protectedPaths: z
     .array(z.string())
@@ -255,6 +267,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   pathGuardPolicy: DEFAULT_GUARD_POLICY,
   protectedPaths: DEFAULT_PROTECTED_PATHS,
   scanScripts: true,
+  heartbeat: true,
   sshCommand: DEFAULT_SSH_COMMAND,
   pluginEnabled: true,
   logEnabled: true,
@@ -460,6 +473,7 @@ function normalizePolicy(value) {
       ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
       : [...DEFAULT_PROTECTED_PATHS],
     scanScripts: value?.scanScripts !== false,
+    heartbeat: value?.heartbeat !== false,
     sshCommand: typeof value?.sshCommand === 'string' && value.sshCommand.trim().length > 0
       ? value.sshCommand
       : DEFAULT_SSH_COMMAND,
@@ -909,6 +923,47 @@ function setup(ctx, entry = {}) {
     path: policy.current.logPath.length > 0 ? policy.current.logPath : defaultLogPath(),
   }))
   ctx.effect(() => () => log.close(), 'git-for-dsh: diagnostic log')
+
+  /**
+   * The call currently in flight, if any.
+   *
+   * Written by the guard's enter line and cleared by its exit line, so a wedged call stays
+   * "open" and every heartbeat keeps reporting it — with a growing age, which is the
+   * duration of the stall.
+   */
+  const flight = { tool: undefined, startedAt: 0 }
+  /** Every few seconds, so an idle stall is still visible in the timeline. */
+  const heartbeatMs = 5000
+  let beats = 0
+  const beat = () => {
+    if (policy.current.heartbeat === false) return
+    beats += 1
+    if (flight.tool === undefined) {
+      log.line('heartbeat', { n: beats, open: 'none' })
+      return
+    }
+    log.line('heartbeat', {
+      n: beats,
+      open: flight.tool,
+      openMs: Date.now() - flight.startedAt,
+    })
+  }
+  const timer = ctx.get('timer')
+  ctx.effect(() => {
+    if (timer !== undefined && typeof timer.interval === 'function') {
+      const stop = timer.interval(beat, heartbeatMs)
+      return () => {
+        if (typeof stop === 'function') stop()
+      }
+    }
+    // A composition without the timer service still gets a heartbeat, disposed with this
+    // activation like any other effect.
+    const handle = setInterval(beat, heartbeatMs)
+    // Never let a diagnostic timer keep the process alive: the suite mounts the plugin
+    // many times, and an un-disposed interval makes it run forever.
+    if (typeof handle.unref === 'function') handle.unref()
+    return () => clearInterval(handle)
+  }, 'git-for-dsh: heartbeat')
   log.line('activate', {
     pluginEnabled: policy.current.pluginEnabled,
     operations: policy.current.enabled.length,
@@ -928,24 +983,32 @@ function setup(ctx, entry = {}) {
    */
   const guardCache = { key: undefined, files: [], names: new Set() }
   ctx.on('tools/pre-execute', (execution, next) => {
-    // Off means off: no interception at all, which is what makes the switch a usable
-    // A/B control. No line is logged either, so the log stays quiet while it is off.
-    if (policy.current.pluginEnabled === false) {
-      log.line('guard.off', { tool: execution.name })
-      return next()
-    }
+    /*
+     * Off means off: no interception, no inspection, and no log line. Writing a line here
+     * would keep the plugin in the hot path of every call, which is exactly what makes an
+     * A/B comparison unreliable.
+     */
+    if (policy.current.pluginEnabled === false) return next()
     /*
      * Enter and exit are logged separately and on purpose: a freeze between them names
      * the guard, and a missing exit with no line after it names everything downstream.
      * That is the whole diagnostic value of this log.
      */
     const startedAt = Date.now()
+    flight.tool = execution.name
+    flight.startedAt = startedAt
     log.line('guard.enter', { tool: execution.name })
     try {
       const decision = inspectToolCall(execution, policy.current, guardCache)
+      flight.tool = undefined
+      /*
+       * "delegated", not "allow": a LATER listener in this waterfall can still deny the
+       * call, so this records what the guard decided, not what dsh did. The real outcome is
+       * the tool.done line, written after dispatch.
+       */
       log.line('guard.exit', {
         tool: execution.name,
-        verdict: decision === undefined ? 'allow' : decision.kind,
+        verdict: decision === undefined ? 'delegated' : decision.kind,
         ms: Date.now() - startedAt,
       })
       if (decision !== undefined) return decision
