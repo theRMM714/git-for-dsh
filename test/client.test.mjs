@@ -249,7 +249,12 @@ describe('client bundle: loading', () => {
     // The bug: nativeGitPolicy grew a fourth tier and the decoder kept validating
     // against the three-entry table, so "限制" rendered as "禁止" — a setting that
     // appeared to do nothing.
-    const { NATIVE_GIT_POLICIES, GUARD_POLICIES, CONFIG_POLICIES } = await import('../src/git-catalog.js')
+    const {
+      NATIVE_GIT_POLICIES,
+      GUARD_POLICIES,
+      CONFIG_POLICIES,
+      SCRIPT_CHECK_POLICIES,
+    } = await import('../src/git-catalog.js')
     const { calls } = activate()
     const decode = calls.bindSpec.decode
 
@@ -261,6 +266,9 @@ describe('client bundle: loading', () => {
     }
     for (const id of CONFIG_POLICIES) {
       assert.equal(decode({ dangerousKeyPolicy: id }).dangerousKeyPolicy, id, `dangerousKeyPolicy "${id}" must survive decoding`)
+    }
+    for (const id of SCRIPT_CHECK_POLICIES) {
+      assert.equal(decode({ scriptCheckPolicy: id }).scriptCheckPolicy, id, `scriptCheckPolicy "${id}" must survive decoding`)
     }
 
     // An unknown value still falls back rather than reaching the Host.
@@ -338,9 +346,9 @@ describe('client bundle: loading', () => {
     // Three-way choices are compact segmented buttons, not three radio rows each
     // carrying two lines of prose.
     const segments = collect(page, (element) => element.props?.className?.startsWith('git-tool-segItem') === true)
-    // Native git has four tiers, credential paths three, dangerous keys four — the
-    // toggles are checkboxes, not segments.
-    assert.equal(segments.length, 11)
+    // Native git has four tiers, credential paths three, dangerous keys four, and the
+    // script check three — the toggles are checkboxes, not segments.
+    assert.equal(segments.length, 14)
   })
 
   it('explains a non-JSON port-check answer instead of leaking a parse error', () => {
@@ -508,6 +516,7 @@ describe('client bundle: activation', () => {
       pathGuardPolicy: 'allow',
       protectedPaths: ['~/.git-credentials'],
       scanScripts: false,
+      scriptCheckPolicy: 'restrict',
       sshCommand: '/opt/ssh',
       pluginEnabled: false,
       logEnabled: false,
@@ -525,6 +534,7 @@ describe('client bundle: activation', () => {
       pathGuardPolicy: 'allow',
       protectedPaths: ['~/.git-credentials'],
       scanScripts: false,
+      scriptCheckPolicy: 'restrict',
       sshCommand: '/opt/ssh',
       pluginEnabled: false,
       logEnabled: false,

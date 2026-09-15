@@ -624,3 +624,17 @@ const word = command.slice(start, index)   // → word 为空，index 原地不�
 **顺带一条关于守卫的实践**：这次我用 heredoc 把脚本内联在 bash 命令里，结果**被自己的守卫拒了** —— 正文里含有看起来像 git 调用的片段，命中了 `restrict` 判别器 ✓。一直以来的做法（用 write 工具写脚本、bash 里只留一条短命令）反而不会被误伤 ✓。**这是"内容级检查"的必然代价**：它会把"写代码"误判成"跑命令" ✗ —— 拒一条命令可以接受，漏掉一次真调用不行 ✓。
 
 ---
+
+## 35. schema 的默认值会掩盖迁移分支 —— 用户选过的"关闭"被静默升级
+
+**背景**：把布尔设置 `scanScripts` 换成三档 `scriptCheckPolicy`，并在 `normalizePolicy` 里写了迁移：新键没有值时读旧布尔（`false` → `off`）。测试却红了 —— `scanScripts: false` 并没有变成 `off`。
+
+**根因**：新键在 schema 上带了 `.default("strict")`。schema 在**读取时**就把"文档里没有这个键"填成默认值，于是 `normalizePolicy` 看到的 `scriptCheckPolicy` 永远是 `"strict"` —— **迁移分支永远不可达**，用户当年选的"关闭"被静默升级成"严格"（方向安全，但违背意图，且毫无提示）。
+
+**怎么避**：**要做迁移的键，不要给它 schema 默认值** —— 让"缺省"保持缺省，把默认值的决定权交给归一化层（它能看到旧键）。schemastery 的 `union` 本身就接受未设置（校验为 `undefined`），去掉 `.default()` 即可，不需要任何 hack。
+
+**一般化**：只要"默认值"与"迁移逻辑"同时存在，**谁先跑**就决定迁移是否有效 —— 默认值是 schema 层的事、迁移是归一化层的事，而 schema 在前。凡是"旧配置要延用"的场景都该问：**归一化看到的，是用户的输入，还是 schema 补上的默认值？**
+
+**谁守着**：`test/host.test.mjs` 的三条档位用例（严格／限制／关闭的行为）加 `reads the boolean the tier replaced`（迁移），以及 `test/client.test.mjs` 里把 Host 的档位列表喂进客户端解码器的往返测试。
+
+---

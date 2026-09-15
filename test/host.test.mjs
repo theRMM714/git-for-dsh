@@ -576,6 +576,50 @@ describe('host plugin: the tool guard', () => {
 
   const call = (name, args, cwd = '/fake/cwd') => ({ name, arguments: args, agent: { session: { header: { cwd } } }, signal: new AbortController().signal })
 
+  /** A settings section whose script check is the given tier. */
+  const withTier = (extra) => mount({ settings: settingsWith(extra) })
+
+  /** A write of a shell script whose body is the given line. */
+  const writeScript = (body) => call('write', {
+    file_path: '/repo/deploy.sh',
+    content: `#!/bin/sh\n${body}\n`,
+  }, '/repo')
+
+  it('judges a written script by its tier', async () => {
+    // 严格: a mere mention is enough. It catches a script that only talks about git, and
+    // therefore also catches scripts that are no threat.
+    const strict = await decide(withTier({ scriptCheckPolicy: 'strict' }).recorded, writeScript('echo "see git docs"'))
+    assert.equal(strict.kind, 'deny')
+
+    // 限制: only a real invocation counts, so a mention in a string or a comment passes —
+    // this is the tier that barely misfires.
+    const restrictMention = await decide(withTier({ scriptCheckPolicy: 'restrict' }).recorded, writeScript('echo "see git docs"'))
+    assert.equal(restrictMention.kind, 'delegated')
+    const restrictInvocation = await decide(withTier({ scriptCheckPolicy: 'restrict' }).recorded, writeScript('git status'))
+    assert.equal(restrictInvocation.kind, 'deny')
+
+    // 关闭: the content is not looked at. The command line is still judged when it runs.
+    const off = await decide(withTier({ scriptCheckPolicy: 'off' }).recorded, writeScript('git status'))
+    assert.equal(off.kind, 'delegated')
+  })
+
+  it('does not judge a file that is not a shell script', async () => {
+    // The check is scoped to shell scripts; a note that happens to mention git is not one.
+    const { recorded } = withTier({ scriptCheckPolicy: 'strict' })
+    const decision = await decide(recorded, call('write', {
+      file_path: '/repo/notes.md',
+      content: 'run git status to see the tree',
+    }, '/repo'))
+    assert.equal(decision.kind, 'delegated')
+  })
+
+  it('reads the boolean the tier replaced, so an existing profile keeps its choice', async () => {
+    // scanScripts: false used to mean "do not check", and that must still hold now that the
+    // setting is a policy.
+    const legacyOff = await decide(withTier({ scriptCheckPolicy: undefined, scanScripts: false }).recorded, writeScript('git status'))
+    assert.equal(legacyOff.kind, 'delegated')
+  })
+
   it('refuses native git in bash, and names the way forward', async () => {
     const { recorded } = mount()
     const decision = await decide(recorded, call('bash', { command: 'git status', description: 'x' }))

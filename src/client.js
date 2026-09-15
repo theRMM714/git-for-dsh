@@ -132,6 +132,25 @@ window.__ModuleLoader__.load({
        * narrow one requires a command position (no false refusals, may miss an
        * obfuscated form). The operator picks which error they prefer.
        */
+      /** The script check's tiers, in the order the control shows them. */
+      const SCRIPT_COPY = [
+        {
+          id: 'strict',
+          label: '严格',
+          hint: '脚本内容里只要**提到** git 就拒绝写入。抓得住"只是提了一句"的脚本，也就难免误伤。',
+        },
+        {
+          id: 'restrict',
+          label: '限制',
+          hint: '只有内容里**真的在命令位置调用 git** 才拒绝（引号、注释、字符串里的提及不算）。基本不误伤。',
+        },
+        {
+          id: 'off',
+          label: '关闭',
+          hint: '不检查脚本内容。写入不受影响，运行时的命令行判别仍然生效。',
+        },
+      ]
+
       const NATIVE_COPY = [
         { id: 'deny', label: '禁止', hint: '命令里出现 git 调用就拒绝。最安全，但只是"提到" git 也会被拒。' },
         { id: 'restrict', label: '限制', hint: '只在命令位置判定（开头、; && | $( 之后，或 sudo/env 等前缀之后）。不误伤，但可能漏掉生僻写法。' },
@@ -293,6 +312,7 @@ window.__ModuleLoader__.load({
             logEnabled: CATALOG.defaults.logEnabled !== false,
             heartbeat: CATALOG.defaults.heartbeat === true,
             logPath: CATALOG.defaults.logPath,
+            scriptCheckPolicy: CATALOG.defaults.scriptCheckPolicy,
             scanScripts: CATALOG.defaults.scanScripts !== false,
             sshCommand: CATALOG.defaults.sshCommand,
             pathGuardPolicy: CATALOG.defaults.pathGuardPolicy,
@@ -317,6 +337,9 @@ window.__ModuleLoader__.load({
           logEnabled: section.logEnabled !== false,
           heartbeat: section.heartbeat === true,
           logPath: typeof section.logPath === 'string' ? section.logPath : CATALOG.defaults.logPath,
+          scriptCheckPolicy: SCRIPT_COPY.some((entry) => entry.id === section.scriptCheckPolicy)
+            ? section.scriptCheckPolicy
+            : CATALOG.defaults.scriptCheckPolicy,
           scanScripts: section.scanScripts !== false,
           sshCommand: typeof section.sshCommand === 'string' && section.sshCommand.length > 0
             ? section.sshCommand
@@ -809,13 +832,10 @@ window.__ModuleLoader__.load({
                 '逗号分隔',
               ),
               row(
-                '检查脚本内容',
-                option(
-                  'scanScripts',
-                  value.scanScripts !== false,
-                  '写入脚本时检查内容',
-                  '写 shell 脚本（.sh/.bash 或 shebang）时先看内容：里面有 git 调用就拒绝写入，脚本不会生成。不读磁盘，所以不拖慢调用；由别的方式落地的脚本不会被预检。',
-                ),
+                '写入脚本时检查内容',
+                segmented('scriptCheckPolicy', SCRIPT_COPY, value.scriptCheckPolicy ?? CATALOG.defaults.scriptCheckPolicy),
+                '写 shell 脚本（.sh/.bash 或 shebang）时先看内容，命中就拒绝写入，脚本不会生成。不读磁盘，所以不拖慢调用；'
+                  + '由别的方式（heredoc、pull、其它工具）落地的脚本不会被预检。',
               ),
               row(
                 'SSH 程序',
