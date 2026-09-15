@@ -18,6 +18,7 @@ import {
   buildEnv,
   composeCommand,
   containsNativeGit,
+  createBudget,
   describeCatalog,
   hardenArgv,
   invokesGit,
@@ -356,6 +357,38 @@ describe('the matcher always terminates', () => {
     for (const command of ['', ' ', '>>>', '<<<', '=>', 'a<>b', '""', "''", '-c', 'x -c']) {
       assert.equal(typeof invokesGit(command), 'boolean', JSON.stringify(command))
     }
+  })
+})
+
+describe('every scan is bounded', () => {
+  // The mechanism that makes a hang inside the guard impossible rather than unlikely: a
+  // counter the loops consult. A timer cannot do this job — nothing on the event loop runs
+  // while a synchronous loop spins, which is exactly how the freeze looked.
+  it('exhausts a budget and stops spending', () => {
+    const budget = createBudget(10)
+    assert.equal(budget.exhausted(), false)
+    assert.equal(budget.spend(9), true)
+    assert.equal(budget.exhausted(), false)
+    assert.equal(budget.spend(5), false)
+    assert.equal(budget.exhausted(), true)
+  })
+
+  it('stops a scan when the budget runs out, whatever the input', () => {
+    const budget = createBudget(50)
+    assert.equal(typeof invokesGit('echo ' + 'a'.repeat(5000), budget.spend), 'boolean')
+    assert.equal(budget.exhausted(), true, 'the scan really did stop early')
+
+    const other = createBudget(50)
+    assert.equal(typeof containsNativeGit('git' + 'g'.repeat(5000), other.spend), 'boolean')
+    assert.equal(other.exhausted(), true)
+  })
+
+  it('terminates on inputs that used to cost quadratic time', () => {
+    // isCommandStringQuote used to copy everything before each quote: quadratic, and on a
+    // command full of quotes that was thousands of megabytes of copying.
+    assert.equal(invokesGit('"'.repeat(20000)), false)
+    assert.equal(invokesGit("'".repeat(20000)), false)
+    assert.equal(containsNativeGit('git' + 'g'.repeat(100000)), false)
   })
 })
 
