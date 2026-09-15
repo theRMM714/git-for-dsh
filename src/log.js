@@ -1,31 +1,39 @@
 /**
- * The diagnostic log, without blocking the event loop.
+ * The diagnostic log: durable, and gated per purpose.
  *
- * The history this file records, because the lesson cost three attempts:
+ * Why synchronous, after a detour. The first version streamed, and a line generated just
+ * before the process stopped could sit in the buffer and never reach the disk — which made
+ * "guard.enter without guard.exit" ambiguous between "the guard hung" and "the process
+ * stopped". That ambiguity was the whole cost of streaming, and a synchronous append
+ * removes it: a line is on disk before the next step runs, or it does not exist.
  *
- *  1. Streamed writes. Non-blocking, but a line generated just before the process stopped
- *     could sit in the buffer and never reach the disk — which made "guard.enter without
- *     guard.exit" ambiguous between "the guard hung" and "the process stopped".
- *  2. Synchronous appends, to make every line durable. **This is the one that caused the
- *     freezes.** `appendFileSync` blocks the whole event loop when the filesystem stalls,
- *     and the log itself proved it: the heartbeats stopped at exactly the moment a
- *     `guard.exit` went missing, i.e. the timer could not fire because the loop was stuck
- *     inside the write.
- *  3. Back to streamed writes, which is where this file is now. The durability question is
- *     answered by an INDEPENDENT observer instead — a shell loop the operator runs in their
- *     own terminal, appending a timestamp every few seconds. If that stops too, the machine
- *     stalled rather than our process, and no in-process log can tell the difference.
+ * The detour is worth recording, because it was wrong. While the freezes were being
+ * investigated, a blocking write was accused of causing them, and this file was changed to
+ * stream. The real cause was an infinite loop elsewhere (PITFALLS 31) — a pure-logic bug
+ * that hangs the event loop no matter how the log is written. Durability therefore came
+ * back. What stays true from that episode: the log is the only thing in this plugin that
+ * touches the filesystem, and its default destination is beside the harness state rather
+ * than on a Windows-mounted drive.
  *
- * A diagnostic tool must never be able to hang the thing it is diagnosing.
+ * Two independent gates, because they answer different questions:
+ *
+ *   - the call log (guard.enter / guard.exit / tool.done) says what the plugin DID;
+ *   - the heartbeat says whether the process is ALIVE, and what is stuck if it is not.
+ *
+ * Either may be on alone: a heartbeat with no call log is a liveness probe; a call log with
+ * no heartbeat is an audit trail.
  *
  * @module git-for-dsh/log
  */
-import { createWriteStream, renameSync } from 'node:fs'
+import { appendFileSync, renameSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve as resolvePath } from 'node:path'
 
 /** Rotate before the file grows past this. */
 export const LOG_LIMIT_BYTES = 2 * 1024 * 1024
+
+/** How often the size is checked, in appended lines. */
+const ROTATE_CHECK_EVERY = 200
 
 /** The default destination, beside the rest of the harness state. */
 export function defaultLogPath() {
@@ -36,8 +44,9 @@ export function defaultLogPath() {
 /**
  * Redact and bound one value.
  *
- * A credential URL is the one shape that must never reach a file, and length bounding keeps
- * a large argument from filling the log with itself.
+ * A credential URL is the one shape that must never reach a file — and command text does
+ * reach this file, so token-shaped strings are redacted as well. Length bounding keeps a
+ * large argument from filling the log with itself.
  *
  * @param value - any logged value.
  * @returns a single-line, redacted, bounded string.
@@ -46,10 +55,7 @@ export function formatValue(value) {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   const text = typeof value === 'string' ? value : JSON.stringify(value ?? null)
   const safe = text
-    // A credential URL.
     .replace(/\/\/[^/\s@]+:[^/\s@]*@/g, '//<redacted>@')
-    // Token-shaped strings. Command text reaches this file now, and a token is far more
-    // likely to appear inside a command than as a bare argument.
     .replace(/\b(ghp|gho|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}/g, '<redacted-token>')
     .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, '<redacted-token>')
     .replace(/(Authorization:\s*\S+\s+)[A-Za-z0-9._-]{16,}/gi, '$1<redacted-token>')
@@ -57,96 +63,65 @@ export function formatValue(value) {
 }
 
 /**
- * Open a non-blocking append stream.
+ * Rotate an oversized file.
+ *
+ * Sampled rather than per line: a stat on every append is the syscall-per-call pattern the
+ * guard was cured of.
  *
  * @param path - the log file.
- * @returns a write stream, or undefined when it cannot be opened.
  */
-function openStream(path) {
+function rotateIfNeeded(path) {
   try {
-    const stream = createWriteStream(path, { flags: 'a' })
-    // An error on the stream must never become an unhandled rejection or a thrown call.
-    stream.on('error', () => {
-      stream.__dshBroken = true
-    })
-    return stream
+    if (statSync(path).size > LOG_LIMIT_BYTES) renameSync(path, `${path}.1`)
   } catch {
-    return undefined
+    // A missing file is the normal first case; a rotation failure is not fatal.
   }
 }
 
 /**
- * Build the log handle.
+ * Build one log handle, gated by its own reader.
  *
- * @param read - returns the current `{ enabled, path }`.
+ * Two handles over one file is deliberate: each purpose carries its own switch, so the
+ * operator can watch liveness without logging every call, or log every call without a
+ * heartbeat. Appends are small and O_APPEND, so the two interleave safely.
+ *
+ * @param read - returns the current `{ enabled, path }` for THIS purpose.
  * @returns `{ line, close }`.
  */
 export function createDiagnosticLog(read) {
-  let open = { path: undefined, stream: undefined, written: 0 }
-
-  const closeOpen = () => {
-    if (open.stream !== undefined) {
-      try {
-        open.stream.end()
-      } catch {
-        // Closing a broken stream is not a reportable failure.
-      }
-    }
-    open = { path: undefined, stream: undefined, written: 0 }
-  }
-
-  const stream = () => {
-    let config
-    try {
-      config = read()
-    } catch {
-      return undefined
-    }
-    if (config === undefined || config.enabled !== true) {
-      closeOpen()
-      return undefined
-    }
-    const path = typeof config.path === 'string' && config.path.length > 0 ? config.path : defaultLogPath()
-    if (open.path !== path) {
-      closeOpen()
-      open = { path, stream: openStream(path), written: 0 }
-    }
-    return open.stream === undefined || open.stream.__dshBroken === true ? undefined : open.stream
-  }
+  let sinceCheck = 0
 
   return {
     /**
-     * Append one entry. Queued, never awaited, never synchronous: a diagnostic log that can
-     * block the process is worse than no log at all.
+     * Append one entry, and do not return until it is written.
      *
      * @param event - a short event name.
      * @param fields - measured values; never a secret.
      */
     line(event, fields = {}) {
-      const target = stream()
-      if (target === undefined) return
-      const parts = [new Date().toISOString(), event]
-      for (const [key, value] of Object.entries(fields)) parts.push(`${key}=${formatValue(value)}`)
-      const text = `${parts.join(' ')}\n`
+      let config
       try {
-        target.write(text)
+        config = read()
       } catch {
-        // A write failure must never fail the call it was describing.
         return
       }
-      // Rotation is counted, not stat-ed: a stat per append is the syscall-per-call pattern
-      // this file exists to avoid.
-      open.written += text.length
-      if (open.written > LOG_LIMIT_BYTES) {
-        const previous = open.path
-        closeOpen()
-        try {
-          renameSync(previous, `${previous}.1`)
-        } catch {
-          // A failed rotation costs a larger file, nothing more.
-        }
+      if (config === undefined || config.enabled !== true) return
+      const path = typeof config.path === 'string' && config.path.length > 0 ? config.path : defaultLogPath()
+      const parts = [new Date().toISOString(), event]
+      for (const [key, value] of Object.entries(fields)) parts.push(`${key}=${formatValue(value)}`)
+      try {
+        appendFileSync(path, `${parts.join(' ')}\n`)
+      } catch {
+        // A logging failure must never fail the call it was describing.
+        return
+      }
+      sinceCheck += 1
+      if (sinceCheck >= ROTATE_CHECK_EVERY) {
+        sinceCheck = 0
+        rotateIfNeeded(path)
       }
     },
-    close: closeOpen,
+    /** Kept for symmetry: a synchronous append holds nothing open. */
+    close() {},
   }
 }

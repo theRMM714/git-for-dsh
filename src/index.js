@@ -1019,6 +1019,17 @@ function setup(ctx, entry = {}) {
   ctx.effect(() => () => log.close(), 'git-for-dsh: diagnostic log')
 
   /**
+   * The heartbeat writes through its OWN handle, so its switch is independent of the call
+   * log's. Watching liveness should not require logging every call, and logging every call
+   * should not require a line every five seconds.
+   */
+  const beatLog = createDiagnosticLog(() => ({
+    enabled: policy.current.heartbeat === true,
+    path: policy.current.logPath.length > 0 ? policy.current.logPath : defaultLogPath(),
+  }))
+  ctx.effect(() => () => beatLog.close(), 'git-for-dsh: heartbeat log')
+
+  /**
    * The call currently in flight, if any.
    *
    * Written by the guard's enter line and cleared by its exit line, so a wedged call stays
@@ -1030,13 +1041,13 @@ function setup(ctx, entry = {}) {
   const heartbeatMs = 5000
   let beats = 0
   const beat = () => {
-    if (policy.current.pluginEnabled === false || policy.current.heartbeat === false) return
+    if (policy.current.pluginEnabled === false || policy.current.heartbeat !== true) return
     beats += 1
     if (flight.tool === undefined) {
-      log.line('heartbeat', { n: beats, open: 'none' })
+      beatLog.line('heartbeat', { n: beats, open: 'none' })
       return
     }
-    log.line('heartbeat', {
+    beatLog.line('heartbeat', {
       n: beats,
       open: flight.tool,
       openMs: Date.now() - flight.startedAt,
