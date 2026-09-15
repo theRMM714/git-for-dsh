@@ -19,6 +19,15 @@ after(() => {
   rmSync(scratch, { recursive: true, force: true })
 })
 
+/**
+ * Wait for a streamed write to land.
+ *
+ * The log is deliberately non-blocking — a synchronous append once froze the whole
+ * application when the filesystem stalled — so a test cannot read the file immediately
+ * after logging.
+ */
+const settle = () => new Promise((resolve) => { setTimeout(resolve, 50) })
+
 /** Read a log file's lines, or an empty list when it was never created. */
 const lines = (path) => {
   try {
@@ -49,25 +58,28 @@ describe('log values', () => {
 })
 
 describe('the log handle', () => {
-  it('writes a line per event when enabled', () => {
+  it('writes a line per event when enabled', async () => {
     const path = join(scratch, 'enabled.log')
     const log = createDiagnosticLog(() => ({ enabled: true, path }))
     log.line('guard.enter', { tool: 'bash' })
     log.line('guard.exit', { tool: 'bash', verdict: 'allow', ms: 1 })
+    await settle()
     const written = lines(path)
     assert.equal(written.length, 2)
     assert.match(written[0], /guard\.enter tool=bash$/)
     assert.match(written[1], /guard\.exit tool=bash verdict=allow ms=1$/)
   })
 
-  it('writes nothing while it is switched off', () => {
+  it('writes nothing while it is switched off', async () => {
     const path = join(scratch, 'disabled.log')
     const log = createDiagnosticLog(() => ({ enabled: false, path }))
     log.line('guard.enter', { tool: 'bash' })
+    // Wait even for the negative case: a queued write could land late.
+    await settle()
     assert.deepEqual(lines(path), [])
   })
 
-  it('follows a path change without being rebuilt', () => {
+  it('follows a path change without being rebuilt', async () => {
     // The settings page can redirect the log mid-investigation; that only works if the
     // destination is read per line rather than captured at construction.
     const first = join(scratch, 'before.log')
@@ -77,6 +89,7 @@ describe('the log handle', () => {
     log.line('activate', {})
     current = { enabled: true, path: second }
     log.line('activate', {})
+    await settle()
     assert.equal(lines(first).length, 1)
     assert.equal(lines(second).length, 1)
   })
@@ -87,10 +100,11 @@ describe('the log handle', () => {
     assert.doesNotThrow(() => log.line('activate', { a: 1 }))
   })
 
-  it('appends rather than truncating across activations', () => {
+  it('appends rather than truncating across activations', async () => {
     const path = join(scratch, 'append.log')
     writeFileSync(path, 'first\n')
     createDiagnosticLog(() => ({ enabled: true, path })).line('second', {})
+    await settle()
     const written = lines(path)
     assert.equal(written[0], 'first', 'the pre-existing content is kept')
     assert.match(written[1], / second$/, 'and the new line is appended after it')
