@@ -1044,6 +1044,15 @@ window.__ModuleLoader__.load({
                   : logView.body.lines.join('\n'),
               ),
               details(
+                '如果这个页面点不动了',
+                '进程卡住时这个页面会跟着一起没有响应 —— 因为它正是由那个进程提供的，页面上的任何按钮都救不了它。'
+                  + '这时代码里的一切都无能为力，需要外面动手：在另一个终端运行 '
+                  + 'tools/watchdog.sh（只探测并报告），或 '
+                  + 'DSH_RESTART_CMD="dsh web" tools/watchdog.sh --restart（探测到卡死后 kill -9 并重启）。'
+                  + '它探测的是 dsh 自己的 web 服务，所以不依赖本插件。'
+                  + '另外，无论如何都能用 DSH_GIT_TOOL_DISABLED=1 dsh web 完全跳过本插件启动。',
+              ),
+              details(
                 '日志里有什么、没有什么',
                 '记：插件激活时的策略快照、每一次工具调用的 enter/exit 与判定结果和耗时、插件关闭与拒绝的原因。'
                   + '不记：命令原文、凭据（那里只记长度与命中的规则名，凭据 URL 额外脱敏）。',
