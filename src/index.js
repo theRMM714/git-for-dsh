@@ -36,6 +36,9 @@ import {
   CONFIG_AUDIT_COMMAND,
   GUARD_POLICIES,
   DEFAULT_GUARD_POLICY,
+  NATIVE_GIT_POLICIES,
+  DEFAULT_NATIVE_GIT_POLICY,
+  invokesGit,
   DEFAULT_PROTECTED_PATHS,
   containsNativeGit,
   mentionsProtectedPath,
@@ -122,9 +125,13 @@ export const Config = z.object({
    * forward.
    */
   nativeGitPolicy: z
-    .union(GUARD_POLICIES.map((policy) => z.const(policy)))
-    .default(DEFAULT_GUARD_POLICY)
-    .description('What to do when bash is used to run git: deny (default), ask, or allow. git_exec is the supported path and passes the allowlist, the argument gate, the audit and approval.'),
+    .union(NATIVE_GIT_POLICIES.map((policy) => z.const(policy)))
+    .default(DEFAULT_NATIVE_GIT_POLICY)
+    .description(
+      'What to do when bash is used to run git: deny (default, broad match — refuses a mere mention too), '
+        + 'restrict (refuses only a real command position: no false refusals, may miss an obfuscated form), '
+        + 'ask, or allow. git_exec is the supported path and passes the allowlist, the argument gate, the audit and approval.',
+    ),
   /**
    * What the guard does about the machine credential and identity files.
    *
@@ -188,7 +195,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   approveMutating: true,
   dangerousKeyPolicy: DEFAULT_CONFIG_POLICY,
   useHostCredentials: false,
-  nativeGitPolicy: DEFAULT_GUARD_POLICY,
+  nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
   pathGuardPolicy: DEFAULT_GUARD_POLICY,
   protectedPaths: DEFAULT_PROTECTED_PATHS,
   proxyPort: 0,
@@ -384,7 +391,9 @@ function normalizePolicy(value) {
     approveMutating: value?.approveMutating !== false,
     dangerousKeyPolicy: CONFIG_POLICIES.includes(value?.dangerousKeyPolicy) ? value.dangerousKeyPolicy : DEFAULT_CONFIG_POLICY,
     useHostCredentials: value?.useHostCredentials === true,
-    nativeGitPolicy: GUARD_POLICIES.includes(value?.nativeGitPolicy) ? value.nativeGitPolicy : DEFAULT_GUARD_POLICY,
+    nativeGitPolicy: NATIVE_GIT_POLICIES.includes(value?.nativeGitPolicy)
+      ? value.nativeGitPolicy
+      : DEFAULT_NATIVE_GIT_POLICY,
     pathGuardPolicy: GUARD_POLICIES.includes(value?.pathGuardPolicy) ? value.pathGuardPolicy : DEFAULT_GUARD_POLICY,
     protectedPaths: Array.isArray(value?.protectedPaths)
       ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
@@ -590,12 +599,24 @@ function inspectToolCall(execution, current) {
 
   if (execution.name === 'bash') {
     const command = typeof args.command === 'string' ? args.command : ''
-    if (containsNativeGit(command)) {
-      return guardDecision(
-        current.nativeGitPolicy,
-        'bash 里的原生 git 已被本插件拦截。请改用 git_exec 工具：它有允许清单、参数闸门、配置审计与逐次审批，而 bash 里的 git 会绕过全部这些闸门。'
-          + (current.nativeGitPolicy === 'ask' ? '（当前策略为「询问」：若确实需要，请在审批中确认。）' : ''),
-      )
+    if (current.nativeGitPolicy !== 'allow') {
+      /*
+       * The tier decides BOTH what counts as an invocation and what to do about it.
+       * deny/ask use the broad matcher (a mention counts); restrict uses the
+       * command-position matcher, which never refuses a mere mention.
+       */
+      const narrow = current.nativeGitPolicy === 'restrict'
+      const matched = narrow ? invokesGit(command) : containsNativeGit(command)
+      if (matched) {
+        return guardDecision(
+          current.nativeGitPolicy === 'ask' ? 'ask' : 'deny',
+          'bash 里的原生 git 已被本插件拦截（当前策略：'
+            + current.nativeGitPolicy
+            + (narrow ? '，只在命令位置判定' : '，出现 git 调用即判定')
+            + '）。请改用 git_exec：它有允许清单、参数闸门、配置审计与逐次审批，bash 里的 git 会绕过全部这些闸门。'
+            + (current.nativeGitPolicy === 'ask' ? '（若确实需要，请在审批中确认。）' : ''),
+        )
+      }
     }
     if (mentionsProtectedPath(command, current.protectedPaths)) {
       return guardDecision(
@@ -923,6 +944,9 @@ async function auditRepositoryConfig(ctx, exec, subcommand, policy, workdir, wor
    * A type that cannot be a policy is a bug in this file, not an unreadable
    * repository, so it must not be absorbed.
    */
+  // Off means off: no shell call, no refusal. It is the operator's explicit choice,
+  // so it must not be silently equivalent to "audit ran and found nothing".
+  if (policy === 'off') return null
   if (typeof policy !== 'string' || !CONFIG_POLICIES.includes(policy)) {
     throw new TypeError(`git-tool internal error: the repository-config audit needs a policy name, received ${typeof policy}`)
   }

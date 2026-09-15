@@ -282,7 +282,9 @@ describe('client bundle: loading', () => {
     const page = renderPage(activate().calls)
     const notes = collect(page, (element) => element.props?.className === 'git-tool-rowNote')
       .map((note) => note.children.join(''))
-    assert.ok(notes.some((note) => note.includes('改用 git_exec')), 'the native-git row points at the tool')
+    // The native-git row explains the match trade-off; the path row explains why a read
+    // is unnecessary at all. Different questions, different answers.
+    assert.ok(notes.some((note) => note.includes('提到') && note.includes('也会被拒')), 'the native-git row states its cost')
     assert.ok(notes.some((note) => note.includes('认证由 git_exec 内部完成')), 'the path row explains why no read is needed')
     assert.notEqual(notes[0], notes[1], 'the two guards must not share one hint')
   })
@@ -297,9 +299,9 @@ describe('client bundle: loading', () => {
     // Three-way choices are compact segmented buttons, not three radio rows each
     // carrying two lines of prose.
     const segments = collect(page, (element) => element.props?.className?.startsWith('git-tool-segItem') === true)
-    // Three three-way choices (native git, credential paths, dangerous keys), three
-    // options each. The two toggles are checkboxes, not segments.
-    assert.equal(segments.length, 9)
+    // Native git has four tiers, credential paths three, dangerous keys four — the
+    // toggles are checkboxes, not segments.
+    assert.equal(segments.length, 11)
   })
 
   it('explains a non-JSON port-check answer instead of leaking a parse error', () => {
