@@ -711,6 +711,63 @@ function absoluteProtectedPath(entry) {
 }
 
 /**
+ * The repository-config audit's cache, so a git call does not pay for a second process.
+ *
+ * Keyed by every input the verdict depends on — the directory, the policy, and the state
+ * (mtime + size) of the repository's own configuration — so a changed configuration cannot
+ * produce a stale verdict. Only the raw KEYS are cached; the verdict is recomputed per call
+ * from the current subcommand, which is why the subcommand is not part of the key.
+ *
+ * Two limits are stated rather than hidden:
+ *
+ *  - **Includes.** The audit follows `[include]` directives, and the paths they name are not
+ *    visible here without asking git — the very call being avoided. An edit to an included
+ *    file is therefore caught by the TTL, not immediately.
+ *  - **Worktrees.** Where `.git` is a file rather than a directory there is no configuration
+ *    to watch, so nothing is cached at all.
+ *
+ * The `statSync` here reads a drvfs path on a Windows-mounted repository, which is exactly
+ * what the guard must never do — and it is fine HERE, because this runs once per
+ * `git_exec` call (an operation that already spawns processes) rather than on every tool
+ * call.
+ */
+const auditCache = new Map()
+
+/** How long a cached audit stays usable. Bounds an edit to an included file. */
+const AUDIT_CACHE_TTL_MS = 30_000
+
+/** How many repositories may be remembered at once. */
+const AUDIT_CACHE_MAX = 32
+
+/**
+ * The state stamp of one file.
+ * @param path - the file to stamp.
+ * @returns `mtimeMs:size`, or undefined when it cannot be read.
+ */
+function fileStamp(path) {
+  try {
+    const info = statSync(path)
+    return `${info.mtimeMs}:${info.size}`
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A stamp for the configuration a repository's audit reads.
+ * @param workdir - the directory the audit runs in.
+ * @returns a stamp, or undefined when this repository cannot be watched.
+ */
+function repositoryStamp(workdir) {
+  if (typeof workdir !== 'string' || workdir.length === 0) return undefined
+  const main = fileStamp(resolvePath(workdir, '.git', 'config'))
+  // No configuration to watch: do not cache, rather than cache something unverifiable.
+  if (main === undefined) return undefined
+  const worktree = fileStamp(resolvePath(workdir, '.git', 'config.worktree'))
+  return worktree === undefined ? main : `${main}|${worktree}`
+}
+
+/**
  * Tell the operator about a failure the log cannot record.
  *
  * The log is how this plugin speaks, so when the LOG is the thing failing there is nowhere
@@ -1457,6 +1514,14 @@ async function auditRepositoryConfig(ctx, exec, subcommand, policy, workdir, wor
   if (typeof policy !== 'string' || !CONFIG_POLICIES.includes(policy)) {
     throw new TypeError(`git-tool internal error: the repository-config audit needs a policy name, received ${typeof policy}`)
   }
+  const stamp = repositoryStamp(workdir)
+  const cacheKey = stamp === undefined ? undefined : `${workdir ?? ''}\u0000${policy}\u0000${stamp}`
+  const cached = cacheKey === undefined ? undefined : auditCache.get(cacheKey)
+  if (cached !== undefined && Date.now() - cached.at < AUDIT_CACHE_TTL_MS) {
+    const reused = auditRepoConfig(cached.keys, subcommand, policy)
+    return reused.ok ? null : `git ${subcommand} was not run: ${reused.reason}`
+  }
+
   let spec
   let result
   try {
@@ -1486,7 +1551,13 @@ async function auditRepositoryConfig(ctx, exec, subcommand, policy, workdir, wor
   }
   if (result.exitCode !== 0) return null
 
-  const verdict = auditRepoConfig(parseConfigKeys(result.stdout.text), subcommand, policy)
+  const keys = parseConfigKeys(result.stdout.text)
+  if (cacheKey !== undefined) {
+    auditCache.set(cacheKey, { at: Date.now(), keys })
+    // Bounded: a long-lived session must not accumulate one entry per repository seen.
+    if (auditCache.size > AUDIT_CACHE_MAX) auditCache.clear()
+  }
+  const verdict = auditRepoConfig(keys, subcommand, policy)
   if (verdict.ok) return null
   return `git ${subcommand} was not run: ${verdict.reason}`
 }
