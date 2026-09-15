@@ -807,7 +807,21 @@ export function buildEnv(options = {}) {
    * The program path goes through a shell, so a path with spaces must be quoted —
    * "C:\Program Files\Git\usr\bin\ssh.exe" and the like would otherwise split.
    */
-  const sshProgram = /\s/.test(sshCommand) ? `"${sshCommand}"` : sshCommand
+  /*
+   * A Windows path becomes forward slashes, and the program is always quoted.
+   *
+   * GIT_SSH_COMMAND is parsed by a shell. Unquoted, every backslash in a Windows path is
+   * eaten as an escape: C:\Windows\System32\OpenSSH\ssh.exe reached git as
+   * C:WindowsSystem32OpenSSHssh.exe, which is the "command not found" this fixes. Inside
+   * double quotes a backslash is literal, and Windows itself accepts forward slashes — so
+   * both defences are applied and the path survives whichever shell parses it.
+   *
+   * The test is the SHAPE of the path rather than the platform, so a Windows path is
+   * normalised even when the harness runs elsewhere (and the rule is testable anywhere).
+   */
+  const looksLikeWindowsPath = /^[a-zA-Z]:[\\/]/.test(sshCommand)
+  const sshPath = looksLikeWindowsPath ? sshCommand.replace(/\\/g, '/') : sshCommand
+  const sshProgram = `"${sshPath}"`
   env.GIT_SSH_COMMAND = `${sshProgram} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`
 
   /*
