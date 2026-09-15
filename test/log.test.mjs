@@ -111,6 +111,33 @@ describe('the log handle', () => {
   })
 })
 
+describe('two gates, one file', () => {
+  it('lets either purpose log alone', async () => {
+    const path = join(scratch, 'gates.log')
+    // The call log's switch is off, the heartbeat's is on.
+    const calls = createDiagnosticLog(() => ({ enabled: false, path }))
+    const beats = createDiagnosticLog(() => ({ enabled: true, path }))
+    calls.line('guard.enter', { tool: 'bash' })
+    beats.line('heartbeat', { n: 1, open: 'none' })
+    await settle()
+    const written = lines(path)
+    assert.equal(written.length, 1)
+    assert.match(written[0], /heartbeat n=1 open=none$/)
+  })
+
+  it('writes both when both are on, and neither when both are off', async () => {
+    const path = join(scratch, 'gates-both.log')
+    const on = createDiagnosticLog(() => ({ enabled: true, path }))
+    on.line('guard.enter', { tool: 'bash' })
+    on.line('heartbeat', { n: 1 })
+    const off = createDiagnosticLog(() => ({ enabled: false, path: join(scratch, 'never.log') }))
+    off.line('heartbeat', { n: 2 })
+    await settle()
+    assert.equal(lines(path).length, 2)
+    assert.deepEqual(lines(join(scratch, 'never.log')), [])
+  })
+})
+
 describe('the default destination', () => {
   it('sits beside the harness state, not on a Windows drive', () => {
     // This file is written synchronously once per tool call, so where it lives is a
