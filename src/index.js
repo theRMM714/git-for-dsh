@@ -637,6 +637,15 @@ const PROXY_CHECK_PATH = '/git-tool/proxy-check'
 /** Whether the harness itself runs on Windows, rather than in WSL on Linux. */
 const IS_WINDOWS = process.platform === 'win32'
 
+/**
+ * Whether this is Linux — WSL or a real distribution.
+ *
+ * Only Linux has Windows drives to look for, and only Linux has /mnt. macOS ships its own
+ * ssh at /usr/bin/ssh and needs none of that: running the Windows logic there produced
+ * "no Windows drive visible" as an answer, which is not a statement about a Mac.
+ */
+const IS_LINUX = process.platform === 'linux'
+
 /** Where a native Windows OpenSSH is normally installed. */
 const WINDOWS_NATIVE_CANDIDATES = Object.freeze([
   'C:\\Windows\\System32\\OpenSSH\\ssh.exe',
@@ -704,6 +713,8 @@ function toWslPath(windowsPath) {
  */
 function windowsWhereSsh() {
   const found = []
+  // where.exe is a Windows program: on macOS neither form exists, so do not try.
+  if (!IS_WINDOWS && !IS_LINUX) return []
   const commands = IS_WINDOWS ? ['where.exe'] : ['where.exe', '/mnt/c/Windows/System32/where.exe']
   for (const command of commands) {
     let result
@@ -728,8 +739,8 @@ function windowsWhereSsh() {
 
 /** Where Windows drives are mounted, by default and by common alternatives. */
 function windowsMountRoots() {
-  // Native Windows has no mounts to read: the candidates above are already real paths.
-  if (IS_WINDOWS) return []
+  // Only Linux mounts Windows drives; Windows and macOS have nothing to enumerate.
+  if (!IS_LINUX) return []
   const roots = ['/mnt/c', '/c']
   try {
     for (const entry of readdirSync('/mnt')) {
@@ -811,6 +822,7 @@ function sshCandidateScan() {
     rows,
     checked: rows.length,
     nativeWindows: IS_WINDOWS,
+    platform: process.platform,
     // Whether any Windows drive was visible at all: a negative report means "install ssh"
     // only when the places it would live in could actually be looked at.
     windowsMounts: windowsMountRoots().filter((root) => {
