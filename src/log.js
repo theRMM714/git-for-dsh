@@ -88,8 +88,23 @@ function rotateIfNeeded(path) {
  * @param read - returns the current `{ enabled, path }` for THIS purpose.
  * @returns `{ line, close }`.
  */
-export function createDiagnosticLog(read) {
+export function createDiagnosticLog(read, onFailure) {
   let sinceCheck = 0
+  /*
+   * The log is the plugin's voice. When the VOICE is what broke there is nothing left to
+   * write to, so the caller decides — and it is told once per distinct message, because a
+   * broken log must not turn every tool call into console noise.
+   */
+  const reported = new Set()
+  const report = (message) => {
+    if (typeof onFailure !== 'function' || reported.has(message)) return
+    reported.add(message)
+    try {
+      onFailure(message)
+    } catch {
+      // There is nothing left to report to.
+    }
+  }
 
   return {
     /**
@@ -102,7 +117,8 @@ export function createDiagnosticLog(read) {
       let config
       try {
         config = read()
-      } catch {
+      } catch (error) {
+        report(`cannot read its own settings: ${error instanceof Error ? error.message : String(error)}`)
         return
       }
       if (config === undefined || config.enabled !== true) return
@@ -111,8 +127,10 @@ export function createDiagnosticLog(read) {
       for (const [key, value] of Object.entries(fields)) parts.push(`${key}=${formatValue(value)}`)
       try {
         appendFileSync(path, `${parts.join(' ')}\n`)
-      } catch {
-        // A logging failure must never fail the call it was describing.
+      } catch (error) {
+        // A logging failure must never fail the call it was describing — but it must not
+        // vanish either, or a broken log would look like a quiet day.
+        report(`cannot write ${path}: ${error instanceof Error ? error.message : String(error)}`)
         return
       }
       sinceCheck += 1
