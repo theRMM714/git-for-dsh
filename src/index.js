@@ -55,7 +55,8 @@ import {
 } from './git-catalog.js'
 import { probePort, proxyEnvironment, waitForPort } from './proxy.js'
 import { createDiagnosticLog, defaultLogPath } from './log.js'
-import { realpathSync } from 'node:fs'
+import { constants, realpathSync, statSync, accessSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
@@ -593,6 +594,70 @@ const COMMON_PROXY_PORTS = Object.freeze([7890, 7897, 7891, 10808, 10809, 1080, 
 /** The route the settings page asks for a port verdict. */
 const PROXY_CHECK_PATH = '/git-tool/proxy-check'
 
+/** The route the settings page asks which ssh programs exist. */
+const SSH_CHECK_PATH = '/git-tool/ssh-check'
+
+/**
+ * Where an ssh is worth looking for, beyond whatever `$PATH` already holds.
+ *
+ * The Windows paths matter on WSL: a Linux `ssh` is often absent there, and git then finds
+ * a Windows one through the interop path — which is exactly the case that made an SSH
+ * remote unusable through this tool until the pin moved to `GIT_SSH_COMMAND`.
+ */
+const SSH_CANDIDATES = Object.freeze([
+  '/usr/bin/ssh',
+  '/bin/ssh',
+  '/usr/local/bin/ssh',
+  '/opt/homebrew/bin/ssh',
+  '/mnt/c/Windows/System32/OpenSSH/ssh.exe',
+  '/mnt/c/Program Files/OpenSSH/ssh.exe',
+  '/mnt/c/Program Files/Git/usr/bin/ssh.exe',
+])
+
+/**
+ * Every ssh path worth offering: each PATH directory first, then the known locations.
+ *
+ * @returns paths, deduplicated, in the order they should be tried.
+ */
+function sshCandidatePaths() {
+  const found = []
+  const add = (candidate) => {
+    if (typeof candidate === 'string' && candidate.length > 0 && !found.includes(candidate)) found.push(candidate)
+  }
+  for (const directory of (process.env.PATH ?? '').split(':').filter((entry) => entry.length > 0)) {
+    add(`${directory.replace(/\/$/, '')}/ssh`)
+  }
+  for (const candidate of SSH_CANDIDATES) add(candidate)
+  return found
+}
+
+/**
+ * Report which of those exist, are executable, and what they call themselves.
+ *
+ * @returns one row per candidate.
+ */
+function sshCandidateReport() {
+  const rows = []
+  for (const path of sshCandidatePaths()) {
+    let executable = false
+    try {
+      executable = statSync(path).isFile()
+      accessSync(path, constants.X_OK)
+    } catch {
+      executable = false
+    }
+    // Only ask a program that is there for its version; spawning is not free.
+    let version = ''
+    if (executable) {
+      const probe = spawnSync(path, ['-V'], { encoding: 'utf8', timeout: 3000 })
+      const output = `${probe.stdout ?? ''}${probe.stderr ?? ''}`.trim().split('\n')[0] ?? ''
+      version = output.slice(0, 80)
+    }
+    rows.push({ path, executable, version })
+  }
+  return rows
+}
+
 /** The route the settings page reads and clears the diagnostic log through. */
 const LOG_PATH = '/git-tool/log'
 
@@ -886,6 +951,32 @@ function setup(ctx, entry = {}) {
         }
       },
     }), 'git-tool: log route')
+
+    /*
+     * Which ssh programs exist. A click, not a per-call probe: see the log-route comment
+     * above, and entry 29 for why that distinction is load-bearing.
+     */
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: SSH_CHECK_PATH,
+      handler: (req, res) => {
+        const respond = (payload, status = 200) => {
+          res.statusCode = status
+          res.setHeader('content-type', 'application/json; charset=utf-8')
+          res.setHeader('cache-control', 'no-store')
+          res.end(JSON.stringify(payload))
+        }
+        try {
+          respond({
+            current: policy.current.sshCommand,
+            expected: DEFAULT_SSH_COMMAND,
+            candidates: sshCandidateReport(),
+          })
+        } catch (error) {
+          respond({ error: error instanceof Error ? error.message : String(error) }, 500)
+        }
+      },
+    }), 'git-tool: ssh check route')
   }
 
   /**
