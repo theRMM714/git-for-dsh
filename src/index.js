@@ -58,7 +58,7 @@ import {
 } from './git-catalog.js'
 import { probePort, proxyEnvironment, waitForPort } from './proxy.js'
 import { createDiagnosticLog, defaultLogPath } from './log.js'
-import { constants, realpathSync, statSync, accessSync } from 'node:fs'
+import { accessSync, constants, readdirSync, realpathSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -649,10 +649,35 @@ const SSH_CANDIDATES = Object.freeze([
   '/bin/ssh',
   '/usr/local/bin/ssh',
   '/opt/homebrew/bin/ssh',
-  '/mnt/c/Windows/System32/OpenSSH/ssh.exe',
-  '/mnt/c/Program Files/OpenSSH/ssh.exe',
-  '/mnt/c/Program Files/Git/usr/bin/ssh.exe',
 ])
+
+/**
+ * The places a Windows OpenSSH is installed, relative to a mounted drive.
+ *
+ * Kept relative because the mount point and the drive letter are both configurable (see
+ * `/etc/wsl.conf`), and a hardcoded /mnt/c is how this probe managed to miss an ssh that
+ * worked from the Windows side.
+ */
+const WINDOWS_SSH_LAYOUTS = Object.freeze([
+  'Windows/System32/OpenSSH/ssh.exe',
+  'Program Files/OpenSSH/ssh.exe',
+  'Program Files (x86)/OpenSSH/ssh.exe',
+  'Program Files/Git/usr/bin/ssh.exe',
+])
+
+/** Where Windows drives are mounted, by default and by common alternatives. */
+function windowsMountRoots() {
+  const roots = ['/mnt/c', '/c']
+  try {
+    for (const entry of readdirSync('/mnt')) {
+      // A mounted drive appears as a single letter; anything else is not one.
+      if (/^[a-zA-Z]$/.test(entry)) roots.push(`/mnt/${entry}`)
+    }
+  } catch {
+    // No /mnt at all: not WSL, or a very unusual layout. The fixed roots still apply.
+  }
+  return [...new Set(roots)]
+}
 
 /**
  * Every ssh path worth offering: each PATH directory first, then the known locations.
@@ -665,9 +690,16 @@ function sshCandidatePaths() {
     if (typeof candidate === 'string' && candidate.length > 0 && !found.includes(candidate)) found.push(candidate)
   }
   for (const directory of (process.env.PATH ?? '').split(':').filter((entry) => entry.length > 0)) {
-    add(`${directory.replace(/\/$/, '')}/ssh`)
+    const base = directory.replace(/\/$/, '')
+    add(`${base}/ssh`)
+    // On WSL the Windows OpenSSH sits in a PATH directory as an .exe. Searching only for
+    // the extensionless name is why a working Windows ssh was reported as absent.
+    add(`${base}/ssh.exe`)
   }
   for (const candidate of SSH_CANDIDATES) add(candidate)
+  for (const root of windowsMountRoots()) {
+    for (const layout of WINDOWS_SSH_LAYOUTS) add(`${root}/${layout}`)
+  }
   return found
 }
 
@@ -676,7 +708,12 @@ function sshCandidatePaths() {
  *
  * @returns one row per candidate.
  */
-function sshCandidateReport() {
+/**
+ * Report what was found, and enough context to explain a negative.
+ *
+ * @returns `{ rows, checked, windowsMounts }`.
+ */
+function sshCandidateScan() {
   const rows = []
   for (const path of sshCandidatePaths()) {
     let executable = false
@@ -695,7 +732,19 @@ function sshCandidateReport() {
     }
     rows.push({ path, executable, version })
   }
-  return rows
+  return {
+    rows,
+    checked: rows.length,
+    // Whether any Windows drive was visible at all: a negative report means "install ssh"
+    // only when the places it would live in could actually be looked at.
+    windowsMounts: windowsMountRoots().filter((root) => {
+      try {
+        return statSync(root).isDirectory()
+      } catch {
+        return false
+      }
+    }).length,
+  }
 }
 
 /** The route the settings page reads and clears the diagnostic log through. */
@@ -1133,10 +1182,13 @@ function setup(ctx, entry = {}) {
           res.end(JSON.stringify(payload))
         }
         try {
+          const scan = sshCandidateScan()
           respond({
             current: policy.current.sshCommand,
             expected: DEFAULT_SSH_COMMAND,
-            candidates: sshCandidateReport(),
+            candidates: scan.rows,
+            checked: scan.checked,
+            windowsMounts: scan.windowsMounts,
           })
         } catch (error) {
           respond({ error: error instanceof Error ? error.message : String(error) }, 500)
