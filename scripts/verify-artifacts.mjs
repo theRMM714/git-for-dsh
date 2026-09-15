@@ -22,7 +22,7 @@ const lib = fileURLToPath(new URL('../lib/', import.meta.url))
 const scratch = fileURLToPath(new URL('../.tmp-verify/', import.meta.url))
 
 /** The host modules the build copies, plus the generated client bundle. */
-const ARTIFACTS = ['index.js', 'git-catalog.js', 'proxy.js', 'client.js']
+const ARTIFACTS = ['index.js', 'git-catalog.js', 'proxy.js', 'log.js', 'client.js']
 
 const failures = []
 const check = (label, condition, detail) => {

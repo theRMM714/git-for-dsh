@@ -288,6 +288,9 @@ window.__ModuleLoader__.load({
             dangerousKeyPolicy: CATALOG.defaults.dangerousKeyPolicy,
             useHostCredentials: CATALOG.defaults.useHostCredentials === true,
             nativeGitPolicy: CATALOG.defaults.nativeGitPolicy,
+            pluginEnabled: CATALOG.defaults.pluginEnabled !== false,
+            logEnabled: CATALOG.defaults.logEnabled !== false,
+            logPath: CATALOG.defaults.logPath,
             scanScripts: CATALOG.defaults.scanScripts !== false,
             sshCommand: CATALOG.defaults.sshCommand,
             pathGuardPolicy: CATALOG.defaults.pathGuardPolicy,
@@ -308,6 +311,9 @@ window.__ModuleLoader__.load({
           // NATIVE_COPY, not GUARD_COPY: the native-git tiers have one more entry
           // (restrict) than the credential-path ones, and checking the wrong table
           // silently replaced a valid choice with the default.
+          pluginEnabled: section.pluginEnabled !== false,
+          logEnabled: section.logEnabled !== false,
+          logPath: typeof section.logPath === 'string' ? section.logPath : CATALOG.defaults.logPath,
           scanScripts: section.scanScripts !== false,
           sshCommand: typeof section.sshCommand === 'string' && section.sshCommand.length > 0
             ? section.sshCommand
@@ -696,6 +702,14 @@ window.__ModuleLoader__.load({
               'section',
               { className: 'git-tool-tier', hidden: tab !== 'settings' },
 
+              group('插件'),
+              option(
+                'pluginEnabled',
+                value.pluginEnabled !== false,
+                '启用本插件',
+                '关闭后：git_exec 拒绝调用，工具守卫完全不再拦截。立即生效，无需重启 —— 用来做 A/B 对比（例如判断某次卡顿是不是插件造成的）。',
+              ),
+
               group('审批'),
               option(
                 'approveMutating',
@@ -843,6 +857,32 @@ window.__ModuleLoader__.load({
                 '代理的工作方式',
                 '端口已有服务在监听：直接使用它，不启动也不停止（那是你的进程）。端口空闲：执行启动命令，最多等 8 秒；仍没起来就杀掉并报出输出。'
                   + '两者都没有：拒绝并说明。插件只负责拉起你的代理，不注入任何凭据 —— 令牌留在你的代理里。',
+              ),
+
+              group('诊断日志'),
+              option(
+                'logEnabled',
+                value.logEnabled !== false,
+                '写诊断日志',
+                '每次闸门判定记一行（含耗时），流式写入、脱敏、超过 2MB 自动轮转。卡死前最后一行就是线索，所以默认开启。',
+              ),
+              row(
+                '日志路径',
+                React.createElement('input', {
+                  type: 'text',
+                  className: 'git-tool-input',
+                  disabled: !canWrite,
+                  'data-writes': 'true',
+                  placeholder: '留空使用默认路径',
+                  value: proxyDraft.logPath ?? (value.logPath ?? ''),
+                  onChange: (event) => setProxyDraft((previous) => ({ ...previous, logPath: event.target.value })),
+                  onBlur: (event) => writePolicy('logPath', event.target.value),
+                }),
+                (value.logPath ?? '').length > 0 ? '当前：' + value.logPath : '当前：默认（$DSH_HOME/git-for-dsh.log）',
+              ),
+              details(
+                '日志里有什么、没有什么',
+                '记：插件激活时的策略快照、每一次工具调用的 enter/exit 与判定结果和耗时、插件关闭与拒绝的原因。',
               ),
 
               group('仓库配置审计'),

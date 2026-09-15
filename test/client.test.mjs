@@ -321,7 +321,7 @@ describe('client bundle: loading', () => {
     const groups = collect(page, (element) => element.props?.className === 'git-tool-groupTitle')
     assert.deepEqual(
       groups.map((group) => group.children.join('')),
-      ['审批', '闸门', '凭据', '代理', '仓库配置审计'],
+      ['插件', '审批', '闸门', '凭据', '代理', '诊断日志', '仓库配置审计'],
     )
     // Three-way choices are compact segmented buttons, not three radio rows each
     // carrying two lines of prose.
@@ -497,6 +497,9 @@ describe('client bundle: activation', () => {
       protectedPaths: ['~/.git-credentials'],
       scanScripts: false,
       sshCommand: '/opt/ssh',
+      pluginEnabled: false,
+      logEnabled: false,
+      logPath: '/tmp/probe.log',
       proxyPort: 7890,
       proxyCommand: 'my-proxy --port 7890',
     })
@@ -510,6 +513,9 @@ describe('client bundle: activation', () => {
       protectedPaths: ['~/.git-credentials'],
       scanScripts: false,
       sshCommand: '/opt/ssh',
+      pluginEnabled: false,
+      logEnabled: false,
+      logPath: '/tmp/probe.log',
       proxyPort: 7890,
       proxyCommand: 'my-proxy --port 7890',
     })
