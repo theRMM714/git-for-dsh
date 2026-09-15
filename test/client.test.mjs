@@ -267,6 +267,16 @@ describe('client bundle: loading', () => {
     assert.equal(decode({ nativeGitPolicy: 'nonsense' }).nativeGitPolicy, 'deny')
   })
 
+  it('offers reading and clearing the log on its own tab', () => {
+    const page = renderPage(activate().calls)
+    const buttons = collect(page, (element) => element.type === 'button')
+      .map((button) => button.children.join(''))
+    assert.ok(buttons.includes('刷新'), 'a refresh action exists')
+    assert.ok(buttons.includes('清空日志'), 'and a clear action')
+    const box = collect(page, (element) => element.props?.className === 'git-tool-log')
+    assert.equal(box.length, 1, 'the log has a display area')
+  })
+
   it('paginates: one tab per group, and only the active panel is not hidden', () => {
     // The page listed 47 operations plus every strategy control in one column; the
     // tab bar is what keeps it readable. Hidden panels stay MOUNTED, so the content
@@ -275,7 +285,7 @@ describe('client bundle: loading', () => {
     const page = renderPage(calls)
     // Exact, because `git-tool-tabs` (the container) also starts with the same text.
     const tabs = collect(page, (element) => (element.props?.className ?? '').split(' ')[0] === 'git-tool-tab')
-    assert.equal(tabs.length, 4, 'read / write / remote / strategy')
+    assert.equal(tabs.length, 5, 'strategy / read / write / remote / log')
     assert.equal(tabs.filter((tab) => tab.props.className.includes('is-active')).length, 1)
 
     const panels = collect(page, (element) => element.props?.className === 'git-tool-tier')
@@ -285,6 +295,7 @@ describe('client bundle: loading', () => {
     // Settings first: it is where a decision is waiting, and the operation lists are
     // reference material.
     assert.equal(tabs[0].children.join(''), '策略与代理')
+    assert.equal(tabs[4].children.join(''), '日志')
     assert.equal(visible[0].props['data-tier'], undefined, 'the strategy card opens first')
   })
 
@@ -321,7 +332,7 @@ describe('client bundle: loading', () => {
     const groups = collect(page, (element) => element.props?.className === 'git-tool-groupTitle')
     assert.deepEqual(
       groups.map((group) => group.children.join('')),
-      ['插件', '审批', '闸门', '凭据', '代理', '诊断日志', '仓库配置审计'],
+      ['插件', '审批', '闸门', '凭据', '代理', '仓库配置审计'],
     )
     // Three-way choices are compact segmented buttons, not three radio rows each
     // carrying two lines of prose.
@@ -336,18 +347,18 @@ describe('client bundle: loading', () => {
     // response.json() on it surfaced "Unexpected end of JSON input" — which names the
     // parser rather than the fix (a restart).
     const { exports } = loadPlugin()
-    assert.equal(typeof exports.classifyProxyCheck, 'function')
+    assert.equal(typeof exports.classifyJsonResponse, 'function')
 
-    const live = exports.classifyProxyCheck(200, JSON.stringify({ port: 7897, listening: true, alternatives: [] }))
+    const live = exports.classifyJsonResponse(200, JSON.stringify({ port: 7897, listening: true, alternatives: [] }), 'n/a')
     assert.equal(live.ok, true)
     assert.equal(live.body.listening, true)
 
-    const empty404 = exports.classifyProxyCheck(404, '')
+    const empty404 = exports.classifyJsonResponse(404, '', 'Host 侧没有这个检查路由（运行中的 Host 可能是重启前的版本），请重启 dsh web 后再试。')
     assert.equal(empty404.ok, false)
     assert.match(empty404.message, /重启 dsh web/)
     assert.ok(!empty404.message.includes('JSON input'), 'the parser wording must not reach the page')
 
-    const html = exports.classifyProxyCheck(200, '<!doctype html>')
+    const html = exports.classifyJsonResponse(200, '<!doctype html>', 'n/a')
     assert.equal(html.ok, false)
     assert.match(html.message, /不是 JSON/)
   })
