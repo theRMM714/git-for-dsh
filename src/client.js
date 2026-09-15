@@ -101,10 +101,12 @@ window.__ModuleLoader__.load({
        * cannot drift apart.
        */
       const TABS = [
+        // Settings first: it is where a new user has to decide something, and the
+        // operation lists are reference material they return to.
+        { id: 'settings', label: '策略与代理' },
         { id: 'read', label: '只读' },
         { id: 'write', label: '写操作' },
         { id: 'remote', label: '远程' },
-        { id: 'settings', label: '策略与代理' },
       ]
 
       /**
@@ -114,9 +116,22 @@ window.__ModuleLoader__.load({
        * touching the schema.
        */
       const GUARD_COPY = [
-        { id: 'deny', label: '禁止（默认）', hint: '直接拒绝，并把可用的替代方式写进拒绝原因。' },
-        { id: 'ask', label: '询问', hint: '弹出一次审批，由你当场决定。' },
-        { id: 'allow', label: '允许', hint: '不拦截。这一项只保留在页面上以便解释，等于关闭该保护。' },
+        { id: 'deny', label: '禁止', hint: '直接拒绝，并提示改用 git_exec。' },
+        { id: 'ask', label: '询问', hint: '弹一次审批，由你当场决定。' },
+        { id: 'allow', label: '允许', hint: '不拦截，等于关闭这项保护。' },
+      ]
+
+      /**
+       * The same three verdicts for the credential paths.
+       *
+       * Separate hints on purpose: the alternative for a blocked READ is not
+       * "use git_exec" — the tool reads the credential itself, and that is exactly why
+       * the read is unnecessary.
+       */
+      const PATH_COPY = [
+        { id: 'deny', label: '禁止', hint: '直接拒绝；认证由 git_exec 内部完成，不需要读凭据。' },
+        { id: 'ask', label: '询问', hint: '弹一次审批，由你当场决定。' },
+        { id: 'allow', label: '允许', hint: '不拦截，等于关闭这项保护。' },
       ]
 
       /**
@@ -163,21 +178,9 @@ window.__ModuleLoader__.load({
        * page presents them, each with the reason a reader needs to choose.
        */
       const POLICY_COPY = [
-        {
-          id: 'refuse-repo',
-          label: '一票拒绝（默认）',
-          hint: '仓库 .git/config 里出现任何危险键，本工具在该仓库拒绝执行任何命令。最省心，但含此类键的仓库会完全用不了这个工具。',
-        },
-        {
-          id: 'refuse-affected',
-          label: '只拒受影响的命令',
-          hint: '仅当危险键会影响被请求的子命令时才拒绝。例如 alias.* 劫持不了 git 内建命令，因此不影响 status。',
-        },
-        {
-          id: 'neutralize',
-          label: '尽量中和，只拒无法中和的',
-          hint: '已被钉死的键（core.pager、core.fsmonitor、credential.helper 等）继续正常工作；git 原生通配（filter.*、url.*.insteadOf 等）钉不死，仍然拒绝。',
-        },
+        { id: 'refuse-repo', label: '一票拒绝', hint: '仓库里有危险键就拒绝一切命令。最省心，但含此类键的仓库会完全用不了。' },
+        { id: 'refuse-affected', label: '只拒受影响', hint: '仅当该键会影响这条子命令时才拒绝（alias.* 劫持不了内建命令，所以不影响 status）。' },
+        { id: 'neutralize', label: '尽量中和', hint: '已钉死的键照常工作；钉不死的通配键（filter.*、url.*.insteadOf）仍然拒绝。' },
       ]
 
       /**
@@ -373,7 +376,7 @@ window.__ModuleLoader__.load({
            */
           const [proxyDraft, setProxyDraft] = React.useState({})
           /** Which tab is showing. Everything else stays mounted but hidden. */
-          const [tab, setTab] = React.useState('read')
+          const [tab, setTab] = React.useState('settings')
           /**
            * The last port test, rendered under the field.
            *
@@ -469,6 +472,73 @@ window.__ModuleLoader__.load({
                 : '已启用 ' + enabledSet.size + ' / ' + allNames.length + ' 项操作。'
 
           /** One boolean option row, written through the same scope. */
+          /** A group heading inside the settings tab. */
+          const group = (title) =>
+            React.createElement('h4', { className: 'git-tool-groupTitle' }, title)
+
+          /**
+           * One labelled setting: title on the left, control and its note on the right.
+           *
+           * `data-writes` marks the controls that change the settings document, which
+           * is what has to follow `canWrite`; the port test does not write anything and
+           * must stay usable even when the document cannot be saved.
+           */
+          const row = (title, control, note) =>
+            React.createElement(
+              'div',
+              { className: 'git-tool-row' },
+              React.createElement('span', { className: 'git-tool-rowTitle' }, title),
+              React.createElement(
+                'div',
+                { className: 'git-tool-rowBody' },
+                control,
+                note === undefined || note === null
+                  ? null
+                  : React.createElement('span', { className: 'git-tool-rowNote' }, note),
+              ),
+            )
+
+          /**
+           * A three-way selector: segmented buttons, with the ACTIVE choice's hint
+           * beneath. Three radio rows each carrying two lines of prose took three
+           * times the height for the same information.
+           */
+          const segmented = (field, copy, current) => {
+            const active = copy.find((entry) => entry.id === current) ?? copy[0]
+            return React.createElement(
+              'div',
+              { className: 'git-tool-rowBody' },
+              React.createElement(
+                'div',
+                { className: 'git-tool-seg' },
+                copy.map((entry) =>
+                  React.createElement(
+                    'button',
+                    {
+                      key: entry.id,
+                      type: 'button',
+                      className: 'git-tool-segItem' + (entry.id === active.id ? ' is-active' : ''),
+                      disabled: !canWrite,
+                      'data-writes': 'true',
+                      onClick: () => writePolicy(field, entry.id),
+                    },
+                    entry.label,
+                  ),
+                ),
+              ),
+              React.createElement('span', { className: 'git-tool-rowNote' }, active.hint),
+            )
+          }
+
+          /** A collapsed explanation: the detail stays reachable without owning the page. */
+          const details = (summary, text) =>
+            React.createElement(
+              'details',
+              { className: 'git-tool-details' },
+              React.createElement('summary', { className: 'git-tool-summary' }, summary),
+              React.createElement('p', { className: 'git-tool-detailText' }, text),
+            )
+
           const option = (field, checked, title, hint) =>
             React.createElement(
               'label',
@@ -477,6 +547,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 checked,
                 disabled: !canWrite,
+                'data-writes': 'true',
                 onChange: (event) => writePolicy(field, event.target.checked),
               }),
               React.createElement(
@@ -494,7 +565,7 @@ window.__ModuleLoader__.load({
             React.createElement(
               'p',
               { className: 'git-tool-lead' },
-              '勾选后，AI 才能在文件沙箱之外执行对应的 git 子命令（例如在会话工作区以外的仓库里提交）。未勾选的子命令会在命令启动前被插件拒绝，AI 收到的提示是「该操作未启用」，而不是「沙箱拒绝」。',
+              '勾选后 AI 才能在会话沙箱之外执行对应的 git 子命令；未勾选的在进程启动前就被拒绝，提示为「该操作未启用」。',
             ),
             React.createElement('p', { className: 'git-tool-status' }, status),
           writeError === null
@@ -597,36 +668,76 @@ window.__ModuleLoader__.load({
             React.createElement(
               'section',
               { className: 'git-tool-tier', hidden: tab !== 'settings' },
-              React.createElement(
-                'header',
-                { className: 'git-tool-tierHead' },
-                React.createElement('span', { className: 'git-tool-tierTitle' }, '执行策略'),
-              ),
+
+              group('审批'),
               option(
                 'approveMutating',
                 value.approveMutating !== false,
                 '写操作前询问我',
-                '对「写操作」和「远端 / 毁灭性操作」的每一次调用弹出审批，而不是只靠上面的勾选放行。建议保持开启。',
+                '写档与远程档的每次调用都弹审批，而不只靠勾选放行。',
               ),
-              React.createElement(
-                'div',
-                { className: 'git-tool-policy' },
+
+              group('闸门'),
+              row(
+                '原生 git',
+                segmented('nativeGitPolicy', GUARD_COPY, value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy),
+              ),
+              row(
+                '凭据与身份文件',
+                segmented('pathGuardPolicy', PATH_COPY, value.pathGuardPolicy ?? CATALOG.defaults.pathGuardPolicy),
+              ),
+              row(
+                '受保护的路径',
+                React.createElement('input', {
+                  type: 'text',
+                  className: 'git-tool-input',
+                  disabled: !canWrite,
+                  'data-writes': 'true',
+                  placeholder: '~/.git-credentials, ~/.gitconfig',
+                  value: proxyDraft.protectedPaths ?? (value.protectedPaths ?? []).join(', '),
+                  onChange: (event) => setProxyDraft((previous) => ({ ...previous, protectedPaths: event.target.value })),
+                  onBlur: (event) => writePolicy(
+                    'protectedPaths',
+                    event.target.value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+                  ),
+                }),
+                '逗号分隔',
+              ),
+              details(
+                '挡得住什么、挡不住什么',
+                '原生 git：命令文本里出现 git 调用（含 /usr/bin/git、git.exe、$(git …)、git-credential-*）即拦截，并在原因里指明改用 git_exec。'
+                  + '凭据路径：路径参数解析为绝对路径（跟随软链接）后比较，等于受保护文件、或包含它的目录都算命中；命令文本里出现路径或文件名也算。'
+                  + '两者都是参数文本匹配 —— 拦得住直接写法，拦不住运行时拼出来的路径或写进脚本的命令，因此是策略闸门而非安全边界。'
+                  + '硬保证需要在沙箱里遮蔽这些文件，那属于 dsh 的职责，本插件不做。',
+              ),
+
+              group('凭据'),
+              option(
+                'useHostCredentials',
+                value.useHostCredentials === true,
+                '允许 git 使用本机凭据',
+                '关闭：远程写操作一律失败。开启：git 自己读取凭据助手，令牌不经过参数、审批提示或会话记录。',
+              ),
+              details(
+                '开启后会同时生效的（代价）',
+                '~/.gitconfig 里的一切 —— url.<base>.insteadOf 可以把某个主机重定向到别处（凭据可能被送到非预期的服务器），credential.helper 与 alias.* 是 git 会执行的程序。'
+                  + '只在你信任这台机器的全局配置时开启。'
+                  + '另外，令牌本身仍可被同 uid 的进程读取（dsh 的沙箱限制写入、不限制读取），所以这一项只解决“插件能不能推送”，不解决“令牌会不会被 AI 读到”。',
+              ),
+
+              group('代理'),
+              row(
+                '端口',
                 React.createElement(
-                  'span',
-                  { className: 'git-tool-itemName' },
-                  '代理（插件只负责把你的代理拉起来，不管凭据）',
-                ),
-                React.createElement(
-                  'label',
-                  { className: 'git-tool-field' },
-                  React.createElement('span', { className: 'git-tool-fieldLabel' }, '代理端口（127.0.0.1，0 = 关闭）'),
-                  React.createElement('span', { className: 'git-tool-itemMeta' }, '填好后点下面的「测试这个端口」验证一下 —— 填错端口是这里最容易犯的错。'),
+                  'div',
+                  { className: 'git-tool-inline' },
                   React.createElement('input', {
                     type: 'number',
                     min: 0,
                     max: 65535,
                     className: 'git-tool-input git-tool-inputPort',
                     disabled: !canWrite,
+                    'data-writes': 'true',
                     value: proxyDraft.proxyPort ?? String(value.proxyPort ?? CATALOG.defaults.proxyPort ?? 0),
                     onChange: (event) => setProxyDraft((previous) => ({ ...previous, proxyPort: event.target.value })),
                     onBlur: (event) => {
@@ -636,178 +747,69 @@ window.__ModuleLoader__.load({
                       writePolicy('proxyPort', port)
                     },
                   }),
-                ),
-                React.createElement(
-                  'div',
-                  { className: 'git-tool-field' },
-                  React.createElement('span', { className: 'git-tool-fieldLabel' }, ''),
                   React.createElement(
                     'button',
                     { type: 'button', className: 'git-tool-testButton', onClick: checkPort },
-                    portCheck !== null && portCheck.state === 'loading' ? '测试中…' : '测试这个端口',
+                    portCheck !== null && portCheck.state === 'loading' ? '测试中…' : '端口测试',
                   ),
                 ),
-                portCheck === null
-                  ? null
-                  : React.createElement(
-                    'p',
-                    { className: portCheck.state === 'done' && portCheck.body.listening === true ? 'git-tool-itemMeta' : 'git-tool-tierWarn' },
-                    portCheck.state === 'loading'
-                      ? '正在测试 ' + String(proxyDraft.proxyPort ?? value.proxyPort ?? 0) + ' …'
-                      : portCheck.state === 'failed'
-                        ? '无法测试：' + portCheck.message
-                        : portCheck.body.error !== undefined
-                          ? '测试失败：' + portCheck.body.error
-                          : portCheck.body.listening === true
-                            ? '✓ 127.0.0.1:' + String(portCheck.body.port) + ' 上有服务在监听 —— 远程操作会直接使用它'
-                              + (portCheck.body.effective === true ? '。' : '（注意：保存后才会用作当前端口。）')
-                            : '✗ 127.0.0.1:' + String(portCheck.body.port) + ' 上没有服务。'
-                              + (Array.isArray(portCheck.body.alternatives) && portCheck.body.alternatives.length > 0
-                                ? '但检测到这些端口有服务：' + portCheck.body.alternatives.join('、') + ' —— 若那是你的代理，请把端口改成它。'
-                                : portCheck.body.commandConfigured === true
-                                  ? '设置里有启动命令，插件会在首次远程操作时拉起它并等待监听。'
-                                  : '也没有配置启动命令，远程操作会被拒绝并提示。'),
-                  ),
-                React.createElement(
-                  'label',
-                  { className: 'git-tool-field' },
-                  React.createElement('span', { className: 'git-tool-fieldLabel' }, '启动命令（在首次远程操作时执行一次）'),
-                  React.createElement('input', {
-                    type: 'text',
-                    className: 'git-tool-input',
-                    placeholder: '例如 my-proxy --port 7890',
-                    disabled: !canWrite,
-                    value: proxyDraft.proxyCommand ?? (value.proxyCommand ?? ''),
-                    onChange: (event) => setProxyDraft((previous) => ({ ...previous, proxyCommand: event.target.value })),
-                    onBlur: (event) => writePolicy('proxyCommand', event.target.value),
-                  }),
-                ),
-                React.createElement(
-                  'span',
-                  { className: 'git-tool-itemMeta' },
-                  '端口上已有代理在监听时直接使用它（不启动、也不停止它）；端口空闲时才执行启动命令；两者都没有则拒绝并说明。插件不注入任何凭据 —— 令牌留在你的代理里。',
-                ),
-                React.createElement('span', { className: 'git-tool-itemName' }, '原生 git（bash 里调用 git）'),
-                GUARD_COPY.map((entry) =>
-                  React.createElement(
-                    'label',
-                    { key: 'native-' + entry.id, className: 'git-tool-option' },
-                    React.createElement('input', {
-                      type: 'radio',
-                      name: 'git-tool-native-git-policy',
-                      checked: (value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy) === entry.id,
-                      disabled: !canWrite,
-                      onChange: () => writePolicy('nativeGitPolicy', entry.id),
-                    }),
-                    React.createElement(
-                      'span',
-                      { className: 'git-tool-itemBody' },
-                      React.createElement('span', { className: 'git-tool-itemName' }, entry.label),
-                      React.createElement('span', { className: 'git-tool-itemMeta' }, entry.hint),
-                    ),
-                  ),
-                ),
-                React.createElement(
-                  'span',
-                  { className: 'git-tool-itemMeta' },
-                  'bash 里的 git 会绕过本插件的允许清单、参数闸门、配置审计与审批，所以默认拦截，并提示改用 git_exec。'
-                    + '注意这是**参数文本匹配**（绝对路径与混淆写法可能绕过），它是一道策略闸门，不是安全边界。',
-                ),
-                React.createElement('span', { className: 'git-tool-itemName' }, '凭据/身份文件（read / write / edit / glob / grep）'),
-                GUARD_COPY.map((entry) =>
-                  React.createElement(
-                    'label',
-                    { key: 'paths-' + entry.id, className: 'git-tool-option' },
-                    React.createElement('input', {
-                      type: 'radio',
-                      name: 'git-tool-path-guard-policy',
-                      checked: (value.pathGuardPolicy ?? CATALOG.defaults.pathGuardPolicy) === entry.id,
-                      disabled: !canWrite,
-                      onChange: () => writePolicy('pathGuardPolicy', entry.id),
-                    }),
-                    React.createElement(
-                      'span',
-                      { className: 'git-tool-itemBody' },
-                      React.createElement('span', { className: 'git-tool-itemName' }, entry.label),
-                      React.createElement('span', { className: 'git-tool-itemMeta' }, entry.hint),
-                    ),
-                  ),
-                ),
-                React.createElement(
-                  'label',
-                  { className: 'git-tool-field' },
-                  React.createElement('span', { className: 'git-tool-fieldLabel' }, '受保护的路径（逗号分隔）'),
-                  React.createElement('input', {
-                    type: 'text',
-                    className: 'git-tool-input',
-                    disabled: !canWrite,
-                    value: proxyDraft.protectedPaths ?? (value.protectedPaths ?? []).join(', '),
-                    onChange: (event) => setProxyDraft((previous) => ({ ...previous, protectedPaths: event.target.value })),
-                    onBlur: (event) => writePolicy(
-                      'protectedPaths',
-                      event.target.value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0),
-                    ),
-                  }),
-                ),
-                React.createElement(
-                  'span',
-                  { className: 'git-tool-itemMeta' },
-                  '命中判定：路径参数解析为绝对路径（跟随软链接）后与清单比较，**等于受保护文件、或包含它的目录**都算命中；bash 命令文本里出现路径或文件名也算命中。'
-                    + '它拦得住"顺手读一下"，拦不住运行时拼出来的路径 —— 那需要沙箱层面遮蔽，属于 dsh 的职责，本插件不做。',
-                ),
-                React.createElement(
-                  'span',
-                  { className: 'git-tool-itemName' },
-                  '本机凭据',
-                ),
-                option(
-                  'useHostCredentials',
-                  value.useHostCredentials === true,
-                  '允许 git 读取本机凭据配置（否则插件无法推送）',
-                  '关闭时：隐藏 ~/.gitconfig 与系统配置、清空 credential.helper —— 远程写操作一律失败（cannot read Username）。开启时：git 自己读取凭据助手，令牌不经过参数、审批提示或会话记录。',
-                ),
-                // Always shown, not only once it is on: the cost has to be readable
-                // BEFORE the switch is flipped, which is the only moment it can inform
-                // a decision. The colour only changes when the risk is live.
-                React.createElement(
+                '127.0.0.1；0 = 关闭',
+              ),
+              portCheck === null
+                ? null
+                : React.createElement(
                   'p',
-                  { className: value.useHostCredentials === true ? 'git-tool-tierWarn' : 'git-tool-itemMeta' },
-                  '开启后会同时生效的：~/.gitconfig 里的一切 —— url.<base>.insteadOf 可以把某个主机重定向到别处（凭据可能被送到非预期的服务器），credential.helper 与 alias.* 是 git 会执行的程序。'
-                    + '只在你信任这台机器的全局配置时开启。'
-                    + '另外，令牌本身仍可被同 uid 的进程读取（dsh 的沙箱限制写入、不限制读取），所以这一项只解决"插件能不能推送"，不解决"令牌会不会被 AI 读到"。',
+                  { className: portCheck.state === 'done' && portCheck.body.listening === true ? 'git-tool-rowNote' : 'git-tool-tierWarn' },
+                  portCheck.state === 'loading'
+                    ? '正在测试 ' + String(proxyDraft.proxyPort ?? value.proxyPort ?? 0) + ' …'
+                    : portCheck.state === 'failed'
+                      ? '无法测试：' + portCheck.message
+                      : portCheck.body.error !== undefined
+                        ? '测试失败：' + portCheck.body.error
+                        : portCheck.body.listening === true
+                          ? '✓ 127.0.0.1:' + String(portCheck.body.port) + ' 上有服务在监听，远程操作会直接使用它。'
+                          : '✗ 127.0.0.1:' + String(portCheck.body.port) + ' 上没有服务。'
+                            + (Array.isArray(portCheck.body.alternatives) && portCheck.body.alternatives.length > 0
+                              ? '检测到这些端口有服务：' + portCheck.body.alternatives.join('、') + ' —— 若那是你的代理，请改端口。'
+                              : portCheck.body.commandConfigured === true
+                                ? '已配置启动命令，首次远程操作时插件会拉起它。'
+                                : '也没有配置启动命令，远程操作会被拒绝。'),
                 ),
-                React.createElement('span', { className: 'git-tool-itemName' }, '仓库配置出现危险键时'),
-                POLICY_COPY.map((entry) =>
-                  React.createElement(
-                    'label',
-                    { key: entry.id, className: 'git-tool-option' },
-                    React.createElement('input', {
-                      type: 'radio',
-                      name: 'git-tool-dangerous-key-policy',
-                      checked: (value.dangerousKeyPolicy ?? CATALOG.defaults.dangerousKeyPolicy) === entry.id,
-                      disabled: !canWrite,
-                      onChange: () => writePolicy('dangerousKeyPolicy', entry.id),
-                    }),
-                    React.createElement(
-                      'span',
-                      { className: 'git-tool-itemBody' },
-                      React.createElement('span', { className: 'git-tool-itemName' }, entry.label),
-                      React.createElement('span', { className: 'git-tool-itemMeta' }, entry.hint),
-                    ),
-                  ),
-                ),
+              row(
+                '启动命令',
+                React.createElement('input', {
+                  type: 'text',
+                  className: 'git-tool-input',
+                  disabled: !canWrite,
+                  'data-writes': 'true',
+                  placeholder: '例如 my-proxy --port 7890',
+                  value: proxyDraft.proxyCommand ?? (value.proxyCommand ?? ''),
+                  onChange: (event) => setProxyDraft((previous) => ({ ...previous, proxyCommand: event.target.value })),
+                  onBlur: (event) => writePolicy('proxyCommand', event.target.value),
+                }),
+                '首次远程操作时执行一次',
+              ),
+              details(
+                '代理的工作方式',
+                '端口已有服务在监听：直接使用它，不启动也不停止（那是你的进程）。端口空闲：执行启动命令，最多等 8 秒；仍没起来就杀掉并报出输出。'
+                  + '两者都没有：拒绝并说明。插件只负责拉起你的代理，不注入任何凭据 —— 令牌留在你的代理里。',
+              ),
+
+              group('仓库配置审计'),
+              row(
+                '出现危险配置键时',
+                segmented('dangerousKeyPolicy', POLICY_COPY, value.dangerousKeyPolicy ?? CATALOG.defaults.dangerousKeyPolicy),
               ),
             ),
             React.createElement(
               'p',
               { className: 'git-tool-build' },
-              '页面版本 ' + BUILD + '（与 lib/client.js 里的构建指纹对比；不一致说明浏览器仍在用旧 bundle，请强制刷新）',
+              '页面版本 ' + BUILD + '（与 lib/client.js 对比；不同则强制刷新）',
             ),
             React.createElement(
               'p',
               { className: 'git-tool-note' },
-              '本插件只负责“自己不放行、自己不成漏点”：拒绝 -c / --config-env 与切换仓库的全局选项，默认隐藏 ~/.gitconfig，钉死可钉的危险键，并在仓库配置出现危险键时拒绝执行。'
-                + '它不负责机器级加固 —— dsh 的文件策略限制写入、不限制读取，本机可读文件对模型仍可读；那属于沙箱与密钥保管的问题，不是插件能解决的。',
+              '本插件只负责“自己不放行、自己不成漏点”。机器级加固（沙箱、密钥保管）不在其范围内：dsh 的文件策略限制写入、不限制读取，本机可读文件对模型仍可读。',
             ),
           )
         }
@@ -908,14 +910,27 @@ window.__ModuleLoader__.load({
 
         /* Strategy rows are full-width, so they get a little more room. */
         '.git-tool-option{margin-top:2px}',
-        '.git-tool-policy{display:flex;flex-direction:column;gap:2px;margin-top:4px}',
-        '.git-tool-field{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:8px}',
-        '.git-tool-fieldLabel{flex:none;width:220px;color:var(--dsw-alias-label-secondary);font-size:12.5px;line-height:18px}',
+        '.git-tool-groupTitle{margin:6px 0 -2px;color:var(--dsw-alias-label-secondary);font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}',
+        '.git-tool-row{display:flex;align-items:flex-start;gap:12px;padding:7px 0;border-top:.5px solid var(--dsw-alias-border-l1)}',
+        '.git-tool-row:first-of-type{border-top:none}',
+        '.git-tool-rowTitle{flex:none;width:132px;padding-top:5px;font-size:12.5px;line-height:18px}',
+        '.git-tool-rowBody{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}',
+        '.git-tool-rowNote{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}',
+        '.git-tool-inline{display:flex;align-items:center;gap:8px}',
+        '.git-tool-seg{display:inline-flex;padding:2px;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:9px}',
+        '.git-tool-segItem{appearance:none;margin:0;padding:3px 12px;color:var(--dsw-alias-label-secondary);background:transparent;border:none;border-radius:7px;font:inherit;font-size:12px;line-height:18px;cursor:pointer}',
+        '.git-tool-segItem:hover:not(:disabled){color:var(--dsw-alias-label-primary)}',
+        '.git-tool-segItem.is-active{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-2);font-weight:600}',
+        '.git-tool-segItem:disabled{cursor:not-allowed;opacity:.55}',
+        '.git-tool-details{margin:2px 0 0}',
+        '.git-tool-summary{cursor:pointer;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}',
+        '.git-tool-summary:hover{color:var(--dsw-alias-label-primary)}',
+        '.git-tool-detailText{margin:6px 0 2px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:19px}',
         '.git-tool-input{box-sizing:border-box;flex:1;min-width:0;height:28px;padding:0 8px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l4,var(--dsw-alias-border-l2));border-radius:8px;font:inherit;font-size:12.5px}',
         '.git-tool-inputPort{flex:none;width:110px}',
         '.git-tool-testButton{flex:none;height:28px;padding:0 12px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l2);border-radius:8px;font:inherit;font-size:12.5px;cursor:pointer}',
         '.git-tool-testButton:hover{background:var(--dsw-alias-bg-layer-2)}',
-        '.git-tool-policy input[type="radio"]{flex:none;width:15px;height:15px;margin:8px 0 0;accent-color:var(--dsw-alias-brand-primary);cursor:inherit}',
+        '.git-tool-segItem:focus-visible{outline:1.5px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
         '.git-tool-option>.git-tool-itemBody{gap:4px}',
         '.git-tool-option .git-tool-itemMeta{line-height:18px}',
         '.git-tool-option .git-tool-itemName{font-family:inherit;font-size:13px;font-weight:500;line-height:19px}',

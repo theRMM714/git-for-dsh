@@ -255,7 +255,10 @@ describe('client bundle: loading', () => {
     assert.equal(panels.length, 4, 'three tiers plus the strategy card')
     const visible = panels.filter((panel) => panel.props.hidden !== true)
     assert.equal(visible.length, 1, 'exactly one panel shows at a time')
-    assert.equal(visible[0].props['data-tier'], 'read', 'the read tier opens first')
+    // Settings first: it is where a decision is waiting, and the operation lists are
+    // reference material.
+    assert.equal(tabs[0].children.join(''), '策略与代理')
+    assert.equal(visible[0].props['data-tier'], undefined, 'the strategy card opens first')
   })
 
   it('warns about what the credential setting re-arms', () => {
@@ -270,6 +273,33 @@ describe('client bundle: loading', () => {
     // cannot inform the decision it is about.
     const off = JSON.stringify(renderPage(activate().calls))
     assert.ok(off.includes('url.<base>.insteadOf'), 'the cost is readable while the setting is off')
+  })
+
+  it('gives each guard its own advice', () => {
+    // Both rows once shared one hint, so a blocked READ of the credential file advised
+    // "use git_exec" — which is the right advice for a git invocation and the wrong
+    // advice for a read the tool performs for itself.
+    const page = renderPage(activate().calls)
+    const notes = collect(page, (element) => element.props?.className === 'git-tool-rowNote')
+      .map((note) => note.children.join(''))
+    assert.ok(notes.some((note) => note.includes('改用 git_exec')), 'the native-git row points at the tool')
+    assert.ok(notes.some((note) => note.includes('认证由 git_exec 内部完成')), 'the path row explains why no read is needed')
+    assert.notEqual(notes[0], notes[1], 'the two guards must not share one hint')
+  })
+
+  it('groups the settings instead of listing every control in one column', () => {
+    const page = renderPage(activate().calls)
+    const groups = collect(page, (element) => element.props?.className === 'git-tool-groupTitle')
+    assert.deepEqual(
+      groups.map((group) => group.children.join('')),
+      ['审批', '闸门', '凭据', '代理', '仓库配置审计'],
+    )
+    // Three-way choices are compact segmented buttons, not three radio rows each
+    // carrying two lines of prose.
+    const segments = collect(page, (element) => element.props?.className?.startsWith('git-tool-segItem') === true)
+    // Three three-way choices (native git, credential paths, dangerous keys), three
+    // options each. The two toggles are checkboxes, not segments.
+    assert.equal(segments.length, 9)
   })
 
   it('explains a non-JSON port-check answer instead of leaking a parse error', () => {
@@ -296,8 +326,7 @@ describe('client bundle: loading', () => {
   it('offers a port test beside the field, so a wrong port is visible', () => {
     // The operator entered the wrong port and nothing in the page could have said so.
     const text = JSON.stringify(renderPage(activate().calls))
-    assert.ok(text.includes('测试这个端口'), 'the test button renders')
-    assert.ok(text.includes('填错端口是这里最容易犯的错'), 'and the row says why it exists')
+    assert.ok(text.includes('端口测试'), 'the test button renders')
   })
 
   it('renders the guard settings, including what they cannot do', () => {
@@ -306,8 +335,11 @@ describe('client bundle: loading', () => {
     const text = JSON.stringify(renderPage(activate().calls))
     assert.ok(text.includes('原生 git'), 'the native-git row renders')
     assert.ok(text.includes('受保护的路径'), 'the path list renders')
+    // The wording moved into a collapsed details block, which keeps the nuance
+    // reachable without owning the page.
     assert.ok(text.includes('策略闸门'), 'the page says this is a gate')
-    assert.ok(text.includes('不是安全边界'), 'and that it is not a boundary')
+    assert.ok(text.includes('而非安全边界'), 'and that it is not a boundary')
+    assert.ok(text.includes('git-tool-details'), 'the long explanation is collapsed')
   })
 
   it('declares exactly the services it reads, so activation waits for them', () => {
@@ -367,7 +399,10 @@ function controlRows(element) {
   // that skips arrays would under-count and could miss a disabled control.
   if (Array.isArray(element)) return element.flatMap(controlRows)
   if (element === null || element === undefined || typeof element !== 'object') return []
-  const rows = element.props?.className === 'git-tool-option' ? [element] : []
+  // Collected by MARKER, not by class name: an element marked `data-writes` changes
+  // the settings document, which is precisely the set that has to follow canWrite.
+  // A control that only reads (the port test) is deliberately not in it.
+  const rows = element.props?.['data-writes'] === 'true' ? [element] : []
   return rows.concat((element.children ?? []).flatMap(controlRows))
 }
 
@@ -475,11 +510,16 @@ describe('client bundle: activation', () => {
       snapshot: { status: 'unavailable', value: undefined, revision: undefined, writable: false, mode: 'memory' },
     })
     const page = renderPage(calls)
-    const rows = controlRows(page)
-    assert.ok(rows.length >= 4, 'the allowlist toggle, the approval toggle and the three audit verdicts render')
-    for (const row of rows) {
-      assert.notEqual(row.children[0].props.disabled, true, 'a memory-persistence page must still allow changes')
+    const controls = controlRows(page)
+    assert.ok(controls.length >= 10, 'the toggles, the three selectors and the text fields render')
+    for (const control of controls) {
+      assert.notEqual(control.props.disabled, true, 'a memory-persistence page must still allow changes')
     }
+    // The port test is a READ of the host's state, so it must not be disabled with
+    // the settings document.
+    const buttons = collect(page, (element) => element.type === 'button' && element.props?.className === 'git-tool-testButton')
+    assert.equal(buttons.length, 1)
+    assert.notEqual(buttons[0].props.disabled, true)
   })
 
   it('disables the controls only when there is no settings service at all', () => {
@@ -487,10 +527,10 @@ describe('client bundle: activation', () => {
     // scope. That — and only that — is the disabled case.
     const { calls } = activate({ provide: ['slots'] })
     const page = renderPage(calls)
-    const rows = controlRows(page)
-    assert.ok(rows.length >= 4, 'the controls still render')
-    for (const row of rows) {
-      assert.equal(row.children[0].props.disabled, true, 'an inert scope is the only disabled case')
+    const controls = controlRows(page)
+    assert.ok(controls.length >= 10, 'the controls still render')
+    for (const control of controls) {
+      assert.equal(control.props.disabled, true, 'an inert scope is the only disabled case')
     }
   })
 
