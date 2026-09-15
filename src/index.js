@@ -39,8 +39,7 @@ import {
   NATIVE_GIT_POLICIES,
   DEFAULT_NATIVE_GIT_POLICY,
   invokesGit,
-  findScriptTargets,
-  readScriptText,
+  isShellScriptTarget,
   DEFAULT_SSH_COMMAND,
   DEFAULT_PROTECTED_PATHS,
   containsNativeGit,
@@ -56,7 +55,7 @@ import {
 } from './git-catalog.js'
 import { probePort, proxyEnvironment, waitForPort } from './proxy.js'
 import { createDiagnosticLog, defaultLogPath } from './log.js'
-import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
@@ -160,7 +159,7 @@ export const Config = z.object({
   scanScripts: z
     .boolean()
     .default(true)
-    .description('Read the content of a script a bash command runs, and judge it with the native-git rule. Catches bash deploy.sh; a script that only mentions git may be refused.'),
+    .description('Judge a shell script when it is written: refuse the write when the content invokes git. Costs no filesystem access. A script arriving by other means is not content-checked.'),
   /**
    * The ssh program git runs.
    *
@@ -729,34 +728,35 @@ function inspectToolCall(execution, current, cache) {
         )
       }
     }
-    /*
-     * One level into a script the command runs. `bash deploy.sh` otherwise hides the
-     * invocation behind a filename, and the matchers above only ever see the command.
-     */
-    if (current.scanScripts === true && current.nativeGitPolicy !== 'allow') {
-      for (const target of findScriptTargets(command)) {
-        const text = readScriptText(target, cwd, {
-          join: (base, rest) => resolvePath(base, rest),
-          joinHome: (rest) => resolvePath(homedir(), rest),
-          stat: statSync,
-          read: (absolute) => readFileSync(absolute, 'utf8'),
-        })
-        if (text === undefined) continue
-        const narrow = current.nativeGitPolicy === 'restrict'
-        if ((narrow ? invokesGit(text) : containsNativeGit(text))) {
-          return guardDecision(
-            current.nativeGitPolicy === 'ask' ? 'ask' : 'deny',
-            `bash 执行的脚本「${target}」里检测到 git 调用，已被本插件拦截（当前策略：${current.nativeGitPolicy}）。请改用 git_exec。`,
-          )
-        }
-      }
-    }
     if (mentionsProtectedPath(command, current.protectedPaths)) {
       return guardDecision(
         current.pathGuardPolicy,
         `这条命令提到了受保护的凭据路径（当前保护：${current.protectedPaths.join('、')}）。凭据不需要进入你的上下文 —— 推送认证由 git_exec 内部自行完成。`
           + (current.pathGuardPolicy === 'ask' ? '（当前策略为「询问」。）' : ''),
       )
+    }
+  }
+
+  /*
+   * A script is judged when it is WRITTEN, not when it is run.
+   *
+   * The content is already in the arguments, so this costs no filesystem access — and the
+   * guard runs in the DSH process on every tool call, where a synchronous read risks
+   * stalling the whole application. Refusing here also means the script never lands,
+   * instead of existing and being refused when something tries to run it.
+   */
+  if (current.scanScripts === true && current.nativeGitPolicy !== 'allow' && (execution.name === 'write' || execution.name === 'edit')) {
+    const target = typeof args.file_path === 'string' ? args.file_path : ''
+    const text = execution.name === 'write' ? args.content : args.new_string
+    if (isShellScriptTarget(target, text) && typeof text === 'string') {
+      const narrow = current.nativeGitPolicy === 'restrict'
+      if (narrow ? invokesGit(text) : containsNativeGit(text)) {
+        return guardDecision(
+          current.nativeGitPolicy === 'ask' ? 'ask' : 'deny',
+          `要写入的脚本「${target}」里检测到 git 调用，已被本插件拦截（当前策略：${current.nativeGitPolicy}）。`
+            + '脚本本身没有生成。若确实需要，请改用 git_exec，或在设置里把「写入脚本时检查内容」改为允许。',
+        )
+      }
     }
   }
 

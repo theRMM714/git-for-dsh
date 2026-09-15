@@ -289,7 +289,7 @@ describe('client bundle: loading', () => {
     assert.equal(tabs.filter((tab) => tab.props.className.includes('is-active')).length, 1)
 
     const panels = collect(page, (element) => element.props?.className === 'git-tool-tier')
-    assert.equal(panels.length, 4, 'three tiers plus the strategy card')
+    assert.equal(panels.length, 5, 'three tiers, the strategy card and the log tab')
     const visible = panels.filter((panel) => panel.props.hidden !== true)
     assert.equal(visible.length, 1, 'exactly one panel shows at a time')
     // Settings first: it is where a decision is waiting, and the operation lists are
@@ -332,7 +332,8 @@ describe('client bundle: loading', () => {
     const groups = collect(page, (element) => element.props?.className === 'git-tool-groupTitle')
     assert.deepEqual(
       groups.map((group) => group.children.join('')),
-      ['插件', '审批', '闸门', '凭据', '代理', '仓库配置审计'],
+      // Document order: the settings tab first, then the log tab that follows it.
+      ['插件', '审批', '闸门', '凭据', '代理', '仓库配置审计', '诊断日志'],
     )
     // Three-way choices are compact segmented buttons, not three radio rows each
     // carrying two lines of prose.
@@ -567,9 +568,11 @@ describe('client bundle: activation', () => {
     }
     // The port test is a READ of the host's state, so it must not be disabled with
     // the settings document.
+    // The port test stays usable even when the settings document cannot be written: it
+    // only reads the host's state. The log tab's two buttons are reads as well.
     const buttons = collect(page, (element) => element.type === 'button' && element.props?.className === 'git-tool-testButton')
-    assert.equal(buttons.length, 1)
-    assert.notEqual(buttons[0].props.disabled, true)
+    assert.equal(buttons.length, 3, 'port test, refresh and clear')
+    for (const button of buttons) assert.notEqual(button.props.disabled, true)
   })
 
   it('disables the controls only when there is no settings service at all', () => {
