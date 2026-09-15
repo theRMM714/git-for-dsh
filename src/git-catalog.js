@@ -918,7 +918,10 @@ export const DEFAULT_GUARD_POLICY = 'deny'
  * One definition, shared by the setting's default and the environment builder. A
  * non-Linux host points this somewhere else through the setting.
  */
-export const DEFAULT_SSH_COMMAND = '/usr/bin/ssh'
+export const DEFAULT_SSH_COMMAND = process.platform === 'win32'
+  // Forward slashes on purpose: Windows accepts them, and they need no escaping.
+  ? 'C:/Windows/System32/OpenSSH/ssh.exe'
+  : '/usr/bin/ssh'
 
 /** Extensions that name a shell script. */
 const SHELL_SCRIPT_EXTENSIONS = Object.freeze(['.sh', '.bash', '.zsh', '.ksh', '.dash', '.ash'])
