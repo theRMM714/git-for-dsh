@@ -539,6 +539,18 @@ describe('host plugin: the port test route', () => {
   })
 })
 
+describe('host plugin: the audit can be switched off', () => {
+  it('runs no shell call and refuses nothing', async () => {
+    const { definition, recorded } = mount({
+      configKeys: ['core.fsmonitor'],
+      settings: { ...DEFAULT_CONFIG, dangerousKeyPolicy: 'off' },
+    })
+    await definition.execute({ ...CALL, argv: ['status'] }, execution())
+    assert.equal(recorded.runs.filter((spec) => AUDIT_COMMAND.test(spec.command)).length, 0, 'no audit call')
+    assert.equal(executed(recorded).length, 1, 'and the command ran')
+  })
+})
+
 describe('host plugin: the tool guard', () => {
   const PROTECTED = '/home/probe/.git-credentials'
   const settingsWith = (extra) => ({ ...DEFAULT_CONFIG, protectedPaths: [PROTECTED], ...extra })
@@ -597,6 +609,28 @@ describe('host plugin: the tool guard', () => {
   it('refuses shell text that names a protected path', async () => {
     const { recorded } = mount({ settings: settingsWith({}) })
     assert.equal((await decide(recorded, call('bash', { command: 'cat ' + PROTECTED, description: 'x' }))).kind, 'deny')
+  })
+
+  it('restrict refuses a real invocation but not a mention', async () => {
+    const settings = { ...DEFAULT_CONFIG, nativeGitPolicy: 'restrict', protectedPaths: ['/nonexistent'] }
+    const { recorded } = mount({ settings })
+    assert.equal(
+      (await decide(recorded, call('bash', { command: 'git log', description: 'x' }))).kind,
+      'deny',
+    )
+    // The mention case is what the tier exists for.
+    assert.equal(
+      (await decide(recorded, call('bash', { command: 'echo "(请看 git 的状态)"', description: 'x' }))).kind,
+      'delegated',
+    )
+  })
+
+  it('deny refuses the same mention, so the tiers are not the same rule', async () => {
+    const { recorded } = mount({ settings: { ...DEFAULT_CONFIG, protectedPaths: ['/nonexistent'] } })
+    assert.equal(
+      (await decide(recorded, call('bash', { command: 'echo "(请看 git 的状态)"', description: 'x' }))).kind,
+      'deny',
+    )
   })
 
   it('honours ask and allow', async () => {

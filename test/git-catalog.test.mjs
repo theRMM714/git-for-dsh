@@ -17,8 +17,10 @@ import {
   RISK,
   buildEnv,
   composeCommand,
+  containsNativeGit,
   describeCatalog,
   hardenArgv,
+  invokesGit,
   shellQuote,
   validateArgv,
 } from '../src/git-catalog.js'
@@ -194,6 +196,51 @@ describe('config is read-only', () => {
     refused(['config', '--edit'], /READ forms/)
     refused(['config', '-e'], /READ forms/)
     refused(['config', '-f', '/etc/passwd', '--list'], /READ forms/)
+  })
+})
+
+describe('the native-git matchers differ on purpose', () => {
+  // 禁止 (broad) refuses a mere mention; 限制 (narrow) requires a command position.
+  // Both behaviours are asserted, because the operator chooses between the two errors.
+  it('the broad matcher catches a mention', () => {
+    assert.equal(containsNativeGit('echo "(请看 git 的状态)"'), true)
+    assert.equal(containsNativeGit('git status'), true)
+  })
+
+  it('the narrow matcher catches every real invocation form', () => {
+    for (const command of [
+      'git status',
+      'sudo git push',
+      'env git status',
+      'cd x && git log',
+      'echo x; git commit -m y',
+      '$(git rev-parse HEAD)',
+      'sh -c "git status"',
+      'for f in *; do git add $f; done',
+      '/usr/bin/git log',
+      'git.exe status',
+      'git-credential-store get',
+      'xargs git add',
+    ]) {
+      assert.equal(invokesGit(command), true, command + ' must be refused')
+    }
+  })
+
+  it('the narrow matcher does not refuse a mention', () => {
+    // This is the whole reason the tier exists: it refused the author's own review
+    // script merely for containing the word.
+    for (const command of [
+      'echo "use git here"',
+      'echo "(用 git 查)"',
+      'grep -rn "git" .',
+      'cat notes-about-git.txt',
+      'echo digit',
+      'cat .gitignore',
+      'cd /mnt/d/AIproject/DSHplugins/git-for-dsh',
+      'printf %s "git is a vcs"',
+    ]) {
+      assert.equal(invokesGit(command), false, command + ' must be allowed')
+    }
   })
 })
 

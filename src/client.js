@@ -122,6 +122,21 @@ window.__ModuleLoader__.load({
       ]
 
       /**
+       * The native-git tiers.
+       *
+       * 禁止 and 限制 both refuse and differ in WHAT counts: the broad match treats a
+       * mention as an invocation (safe, though it also refuses a command that merely
+       * narrow one requires a command position (no false refusals, may miss an
+       * obfuscated form). The operator picks which error they prefer.
+       */
+      const NATIVE_COPY = [
+        { id: 'deny', label: '禁止', hint: '命令里出现 git 调用就拒绝。最安全，但只是"提到" git 也会被拒。' },
+        { id: 'restrict', label: '限制', hint: '只在命令位置判定（开头、; && | $( 之后，或 sudo/env 等前缀之后）。不误伤，但可能漏掉生僻写法。' },
+        { id: 'ask', label: '询问', hint: '命中时弹一次审批（判定方式同「限制」）。' },
+        { id: 'allow', label: '允许', hint: '不拦截。' },
+      ]
+
+      /**
        * The same three verdicts for the credential paths.
        *
        * Separate hints on purpose: the alternative for a blocked READ is not
@@ -181,6 +196,7 @@ window.__ModuleLoader__.load({
         { id: 'refuse-repo', label: '一票拒绝', hint: '仓库里有危险键就拒绝一切命令。最省心，但含此类键的仓库会完全用不了。' },
         { id: 'refuse-affected', label: '只拒受影响', hint: '仅当该键会影响这条子命令时才拒绝（alias.* 劫持不了内建命令，所以不影响 status）。' },
         { id: 'neutralize', label: '尽量中和', hint: '已钉死的键照常工作；钉不死的通配键（filter.*、url.*.insteadOf）仍然拒绝。' },
+        { id: 'off', label: '关闭审计', hint: '完全不检查仓库配置。危险键可以借此执行程序（core.fsmonitor、diff.*.command），只在你完全信任仓库时使用。' },
       ]
 
       /**
@@ -680,7 +696,7 @@ window.__ModuleLoader__.load({
               group('闸门'),
               row(
                 '原生 git',
-                segmented('nativeGitPolicy', GUARD_COPY, value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy),
+                segmented('nativeGitPolicy', NATIVE_COPY, value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy),
               ),
               row(
                 '凭据与身份文件',

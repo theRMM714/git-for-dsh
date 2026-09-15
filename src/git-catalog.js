@@ -873,6 +873,18 @@ const DANGEROUS_CONFIG_RULES = Object.freeze([
 export const CONFIG_AUDIT_COMMAND = 'git config --local --includes --list --name-only -z'
 
 /**
+ * The tiers the NATIVE GIT guard can be set to.
+ *
+ * `deny` and `restrict` both refuse, and differ in what counts as an invocation: deny
+ * matches a mention, restrict matches only a command position. Naming both is the
+ * point — the strictness is the operator's choice, not a hidden default.
+ */
+export const NATIVE_GIT_POLICIES = Object.freeze(['deny', 'restrict', 'ask', 'allow'])
+
+/** The default for the native-git guard: refuse, on the broad match. */
+export const DEFAULT_NATIVE_GIT_POLICY = 'deny'
+
+/**
  * The three verdicts the tool guard can apply.
  *
  * `allow` keeps the guard installed but inert, which is how a user turns the feature
@@ -935,6 +947,112 @@ export function containsNativeGit(command) {
 }
 
 /**
+ * Whether one word is a command word for git.
+ *
+ * @param word - a bare word from a command line.
+ * @returns true for `git`, a path ending in git, `git.exe`, or a `git-credential` helper.
+ */
+function isGitWord(word) {
+  const base = word.split('/').slice(-1)[0].toLowerCase()
+  return base === 'git' || base === 'git.exe' || base.startsWith('git-credential')
+}
+
+/** Characters that end a bare word. */
+const WORD_BREAK = new Set([' ', '\t', '\r', '\n', ';', '&', '|', '(', ')', '{', '}', '`', '$', '"', "'", '<', '>'])
+
+/** Characters after which a command may begin. */
+const COMMAND_START = new Set([';', '&', '|', '(', ')', '{', '}', '`', '$', '\n'])
+
+/**
+ * Words that put the NEXT word in command position.
+ *
+ * `do` / `then` / `else` are shell keywords; the rest are wrappers. Without this list,
+ * `sudo git push` would look like an argument and be missed.
+ */
+const COMMAND_PREFIXES = new Set(['sudo', 'env', 'command', 'nohup', 'xargs', 'nice', 'time', 'exec', 'do', 'then', 'else', '!'])
+
+/**
+ * Find the closing quote of the quote that starts at `at`.
+ * @param command - the command text.
+ * @param at - index of the opening quote.
+ * @returns the index of the closing quote, or the end of the string.
+ */
+function findQuoteEnd(command, at) {
+  const quote = command[at]
+  let index = at + 1
+  while (index < command.length) {
+    if (quote === '"' && command[index] === '\\') {
+      index += 2
+      continue
+    }
+    if (command[index] === quote) return index
+    index += 1
+  }
+  return command.length
+}
+
+/**
+ * Whether the text before a quote makes that quote a COMMAND STRING.
+ *
+ * `sh -c "git status"` is an invocation; a quoted argument that merely contains the
+ * word is not.
+ *
+ * @param before - the command text up to the opening quote.
+ * @returns true when the last word is `-c` or `--command`.
+ */
+function isCommandStringQuote(before) {
+  const trimmed = before.replace(/\s+$/, '')
+  return trimmed.endsWith('-c') || trimmed.endsWith('--command')
+}
+
+/**
+ * Whether a shell command INVOKES git, judged by command position rather than by the
+ * presence of the word.
+ *
+ * Quote-aware and recursive: a `-c` command string is scanned as a command of its own.
+ * This is the `restrict` tier's matcher — it does not refuse a mere mention. The cost is
+ * documented: a form that never presents git in a command position, such as
+ * `A=1 git status` or a renamed binary, is missed.
+ *
+ * @param command - the shell command text.
+ * @returns true when git appears where a shell would start a command.
+ */
+export function invokesGit(command) {
+  if (typeof command !== 'string' || command.length === 0) return false
+  let atCommandStart = true
+  let index = 0
+  while (index < command.length) {
+    const ch = command[index]
+    if (ch === '"' || ch === "'") {
+      const end = findQuoteEnd(command, index)
+      const quoted = command.slice(index + 1, end)
+      if (isCommandStringQuote(command.slice(0, index)) && invokesGit(quoted)) return true
+      // A quoted argument is not a command position.
+      atCommandStart = false
+      index = end + 1
+      continue
+    }
+    if (COMMAND_START.has(ch)) {
+      atCommandStart = true
+      index += 1
+      continue
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\r') {
+      index += 1
+      continue
+    }
+    const start = index
+    while (index < command.length && !WORD_BREAK.has(command[index])) index += 1
+    const word = command.slice(start, index)
+    if (atCommandStart) {
+      if (isGitWord(word)) return true
+      atCommandStart = COMMAND_PREFIXES.has(word)
+    }
+  }
+  return false
+}
+
+/**
  * Whether a shell command TEXT names a protected path.
  *
  * Both the whole entry and its basename count: cat ~/.git-credentials and
@@ -979,7 +1097,7 @@ export function reachesProtectedPath(candidate, protectedFiles) {
 
 
 /** The verdicts the audit can be configured to reach. */
-export const CONFIG_POLICIES = Object.freeze(['refuse-repo', 'refuse-affected', 'neutralize'])
+export const CONFIG_POLICIES = Object.freeze(['refuse-repo', 'refuse-affected', 'neutralize', 'off'])
 
 /** The default: any dangerous key refuses the whole call. */
 export const DEFAULT_CONFIG_POLICY = 'refuse-repo'
