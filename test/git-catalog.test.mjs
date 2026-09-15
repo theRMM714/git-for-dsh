@@ -1,0 +1,414 @@
+/**
+ * Tests for the enforcement gate: the catalog, the argument validator, the
+ * environment builder, and command composition.
+ *
+ * These are the assertions that matter — everything else in this plugin is
+ * presentation. Run them with `npm test` (Node's built-in test runner, no
+ * dependencies).
+ *
+ * @module dsh-plugin-git-tool/test/git-catalog.test
+ */
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+import {
+  DEFAULT_ENABLED,
+  ENFORCED_CONFIG,
+  OPERATION_NAMES,
+  RISK,
+  buildEnv,
+  composeCommand,
+  describeCatalog,
+  hardenArgv,
+  shellQuote,
+  validateArgv,
+} from '../src/git-catalog.js'
+
+/** Assert a request is refused, and that the reason mentions something. */
+function refused(argv, fragment) {
+  const verdict = validateArgv(argv)
+  assert.equal(verdict.ok, false, `expected refusal for ${JSON.stringify(argv)}`)
+  if (fragment !== undefined) {
+    assert.match(verdict.reason, fragment, `reason should mention ${fragment}: ${verdict.reason}`)
+  }
+}
+
+/** Assert a request is accepted, and returns the named operation. */
+function allowed(argv, expected) {
+  const verdict = validateArgv(argv)
+  assert.equal(verdict.ok, true, `expected acceptance for ${JSON.stringify(argv)}: ${verdict.reason}`)
+  assert.equal(verdict.operation.name, expected)
+  return verdict
+}
+
+describe('catalog', () => {
+  it('has no duplicate operation names', () => {
+    assert.equal(new Set(OPERATION_NAMES).size, OPERATION_NAMES.length)
+  })
+
+  it('defaults to exactly the read tier', () => {
+    for (const name of DEFAULT_ENABLED) assert.equal(catalogRisk(name), RISK.read, `${name} must be read-only`)
+    const readCount = OPERATION_NAMES.filter((name) => catalogRisk(name) === RISK.read).length
+    assert.equal(DEFAULT_ENABLED.length, readCount)
+  })
+
+  it('ships every tier the settings page renders, with titles', () => {
+    const tiers = describeCatalog()
+    assert.deepEqual(
+      tiers.map((tier) => tier.risk),
+      [RISK.read, RISK.write, RISK.remote],
+    )
+    for (const tier of tiers) {
+      assert.ok(tier.title.length > 0, `${tier.risk} needs a title`)
+      assert.ok(tier.groups.length > 0, `${tier.risk} needs at least one group`)
+    }
+  })
+
+  it('gives every operation a label for the settings page', () => {
+    for (const tier of describeCatalog()) {
+      for (const group of tier.groups) {
+        for (const operation of group.operations) {
+          assert.ok(operation.label.length > 0, `${operation.name} needs a label`)
+        }
+      }
+    }
+  })
+})
+
+/** Risk tier of one catalog name; the test-local mirror of the Host lookup. */
+function catalogRisk(name) {
+  for (const tier of describeCatalog()) {
+    for (const group of tier.groups) {
+      if (group.operations.some((operation) => operation.name === name)) return tier.risk
+    }
+  }
+  throw new Error(`unknown operation ${name}`)
+}
+
+describe('validateArgv: acceptance', () => {
+  it('accepts a bare known subcommand', () => {
+    allowed(['status'], 'status')
+    allowed(['log'], 'log')
+  })
+
+  it('accepts flags', () => {
+    allowed(['status', '--porcelain', '-b'], 'status')
+    allowed(['log', '--oneline', '-n', '20'], 'log')
+    allowed(['diff', '--stat'], 'diff')
+  })
+
+  it('accepts positional arguments for operations that declare them', () => {
+    allowed(['config', '--get', 'user.email'], 'config')
+    allowed(['log', 'main..feature'], 'log')
+    allowed(['show', 'HEAD~3'], 'show')
+  })
+
+  it('accepts paths for a path-taking operation', () => {
+    allowed(['add', 'src/app.js'], 'add')
+    allowed(['restore', '--staged', 'src'], 'restore')
+  })
+
+  it('accepts everything after -- without flag interpretation', () => {
+    allowed(['add', '--', '--weird-file-name'], 'add')
+  })
+})
+
+describe('a short flag means what the SUBCOMMAND says it means', () => {
+  // Found by the live end-to-end test: a blanket refusal of `-c`/`-C`/`-u` blocked
+  // everyday operations. Measured with git 2.55, a global option is honoured ONLY
+  // before the subcommand (`git status -C <repo>` answers "unknown option"), and
+  // that position is already blocked by the first-argument rule.
+  it('allows the legitimate short flags of an allowlisted subcommand', () => {
+    allowed(['switch', '-c', 'newbranch'], 'switch')
+    allowed(['checkout', '-b', 'newbranch'], 'checkout')
+    allowed(['branch', '-c', 'a', 'b'], 'branch')
+    allowed(['commit', '-C', 'HEAD'], 'commit')
+    allowed(['commit', '-c', 'HEAD'], 'commit')
+    allowed(['add', '-u'], 'add')
+    allowed(['init', '--bare'], 'init')
+    allowed(['clone', '--bare', 'https://example.invalid/x.git'], 'clone')
+  })
+
+  it('still refuses them in the GLOBAL position', () => {
+    // The only position git honours them in, and the only dangerous one.
+    refused(['-c', 'core.pager=sh -c evil', 'status'], /must be a git subcommand/)
+    refused(['-C', '/elsewhere', 'status'], /must be a git subcommand/)
+    refused(['--git-dir=/elsewhere/.git', 'status'], /must be a git subcommand/)
+    refused(['--bare', 'status'], /must be a git subcommand/)
+  })
+
+  it('still refuses the program-naming form where it applies', () => {
+    refused(['fetch', '-u', '/tmp/evil', 'origin'], /names a program/)
+    refused(['pull', '-u', '/tmp/evil'], /names a program/)
+    refused(['ls-remote', '-u', '/tmp/evil', 'origin'], /names a program/)
+    refused(['fetch', '--upload-pack=/tmp/evil', 'origin'], /names a program/)
+  })
+})
+
+describe('credentials may not travel in argv', () => {
+  // `git push https://user:token@host/…` was accepted, which put the secret into the
+  // approval prompt and the session log — the tool acting as the leak path it
+  // promises never to be.
+  it('refuses a URL with embedded credentials', () => {
+    refused(['push', 'https://user:ghp_EXAMPLE@github.com/o/r.git', 'main'], /embedded credentials/)
+    refused(['clone', 'https://ghp_EXAMPLE@github.com/o/r.git'], /embedded credentials/)
+    refused(['ls-remote', 'https://x-access-token:ghp_EXAMPLE@github.com/o/r.git'], /embedded credentials/)
+  })
+
+  it('refuses it in the URL forms that look least like a URL', () => {
+    refused(['fetch', 'https://a:b@example.invalid/repo.git'], /embedded credentials/)
+    refused(['pull', 'ssh://user:pw@example.invalid/repo.git'], /embedded credentials/)
+  })
+
+  it('leaves ordinary remotes alone', () => {
+    allowed(['push', 'origin', 'main'], 'push')
+    allowed(['clone', 'https://github.com/owner/repo.git', '/tmp/probe'], 'clone')
+    // scp-like SSH syntax has no userinfo field, and `git@` is a user name, not a secret.
+    allowed(['ls-remote', 'git@github.com:owner/repo.git'], 'ls-remote')
+  })
+})
+
+describe('config is read-only', () => {
+  it('accepts the read forms', () => {
+    allowed(['config', 'user.name'], 'config')
+    allowed(['config', '--get', 'user.name'], 'config')
+    allowed(['config', '--get-regexp', '^user\\.'], 'config')
+    allowed(['config', '--list'], 'config')
+  })
+
+  it('refuses the two-operand write form', () => {
+    // The first half of both code-execution reproductions: this wrote
+    // `core.fsmonitor` / `diff.<driver>.command`, which a later read-only
+    // subcommand then executed.
+    refused(['config', 'user.name', 'X'], /READ forms/)
+    refused(['config', '--local', 'core.fsmonitor', 'sh -c evil'], /READ forms/)
+    refused(['config', '--local', 'diff.evil.command', 'sh -c evil'], /READ forms/)
+  })
+
+  it('refuses every writing or file-selecting flag', () => {
+    refused(['config', '--unset', 'user.name'], /READ forms/)
+    refused(['config', '--unset-all', 'user.name'], /READ forms/)
+    refused(['config', '--add', 'x.y', 'z'], /READ forms/)
+    refused(['config', '--replace-all', 'x.y', 'z'], /READ forms/)
+    refused(['config', '--rename-section', 'a', 'b'], /READ forms/)
+    refused(['config', '--remove-section', 'a'], /READ forms/)
+    refused(['config', '--edit'], /READ forms/)
+    refused(['config', '-e'], /READ forms/)
+    refused(['config', '-f', '/etc/passwd', '--list'], /READ forms/)
+  })
+})
+
+describe('a read-tier operation can have a mutating FORM', () => {
+  // Found by the live end-to-end run: `remote add`, `branch <name>` and
+  // `tag <name>` are read-tier operations that were running WITHOUT approval while
+  // writing .git/config and creating refs.
+  const mutating = (argv) => {
+    const verdict = validateArgv(argv)
+    assert.equal(verdict.ok, true, `expected ${argv.join(' ')} to be accepted: ${verdict.reason}`)
+    return verdict.mutating === true
+  }
+
+  it('branch: listing is a read, naming a ref is not', () => {
+    assert.equal(mutating(['branch']), false)
+    assert.equal(mutating(['branch', '-a', '-v']), false)
+    assert.equal(mutating(['branch', '--list', 'feature/*']), false)
+    assert.equal(mutating(['branch', 'newbranch']), true)
+    assert.equal(mutating(['branch', '-d', 'oldbranch']), true)
+    assert.equal(mutating(['branch', '-m', 'a', 'b']), true)
+  })
+
+  it('tag: listing is a read, creating or deleting is not', () => {
+    assert.equal(mutating(['tag']), false)
+    assert.equal(mutating(['tag', '-l', 'v*']), false)
+    assert.equal(mutating(['tag', 'v1.0.0']), true)
+    assert.equal(mutating(['tag', '-a', 'v1.0.0', '-m', 'release']), true)
+    assert.equal(mutating(['tag', '-d', 'v1.0.0']), true)
+  })
+
+  it('remote: reading is a read, maintenance is a write, config verbs are refused', () => {
+    assert.equal(mutating(['remote']), false)
+    assert.equal(mutating(['remote', '-v']), false)
+    assert.equal(mutating(['remote', 'show', 'origin']), false)
+    assert.equal(mutating(['remote', 'get-url', 'origin']), false)
+    assert.equal(mutating(['remote', 'prune', 'origin']), true)
+    assert.equal(mutating(['remote', 'update']), true)
+
+    // These rewrite .git/config, so they are refused like a config write rather
+    // than gated: `set-url` silently redirects where a later push goes, and that
+    // push's approval prompt would show the command, not the URL.
+    for (const verb of ['add', 'remove', 'rm', 'rename', 'set-url', 'set-head', 'set-branches']) {
+      refused(['remote', verb, 'origin', 'value'], /READ forms/)
+    }
+  })
+})
+
+describe('operand declarations match real usage', () => {
+  it('accepts the ordinary form of the inspection subcommands', () => {
+    allowed(['ls-tree', 'HEAD'], 'ls-tree')
+    allowed(['for-each-ref', 'refs/heads'], 'for-each-ref')
+    allowed(['name-rev', 'HEAD'], 'name-rev')
+  })
+})
+
+describe('clone', () => {
+  it('is in the catalog, remote tier, and off by default', () => {
+    const verdict = allowed(['clone', 'https://example.invalid/x.git'], 'clone')
+    assert.equal(verdict.operation.risk, RISK.remote)
+    assert.equal(verdict.operation.remote, true)
+    assert.ok(!DEFAULT_ENABLED.includes('clone'), 'clone must not be enabled by default')
+  })
+})
+
+describe('diff drivers cannot be re-enabled by the caller', () => {
+  it('refuses --ext-diff and --textconv', () => {
+    refused(['diff', '--ext-diff'], /re-enables an external diff/)
+    refused(['log', '--textconv'], /re-enables an external diff/)
+    refused(['show', '--ext-diff'], /re-enables an external diff/)
+  })
+})
+
+describe('hardenArgv', () => {
+  it('inserts the anti-driver flags for diff-producing subcommands', () => {
+    assert.deepEqual(hardenArgv(['diff', '--stat', 'a.txt']), ['diff', '--no-ext-diff', '--no-textconv', '--stat', 'a.txt'])
+    assert.deepEqual(hardenArgv(['log', '--oneline']), ['log', '--no-ext-diff', '--no-textconv', '--oneline'])
+    assert.deepEqual(hardenArgv(['show', 'HEAD']), ['show', '--no-ext-diff', '--no-textconv', 'HEAD'])
+  })
+
+  it('keeps the flags on the option side of an explicit --', () => {
+    assert.deepEqual(hardenArgv(['diff', '--', 'a.txt']), ['diff', '--no-ext-diff', '--no-textconv', '--', 'a.txt'])
+  })
+
+  it('leaves other subcommands untouched', () => {
+    assert.deepEqual(hardenArgv(['status', '--porcelain']), ['status', '--porcelain'])
+    assert.deepEqual(hardenArgv(['commit', '-m', 'x']), ['commit', '-m', 'x'])
+  })
+})
+
+describe('enforced configuration pins the program-naming keys', () => {
+  it('neutralizes every key that names a program', () => {
+    const pinned = new Map(ENFORCED_CONFIG.map((pair) => [pair.key, pair.value]))
+    // `core.fsmonitor` made `git status` execute a configured program, and
+    // `core.sshCommand` / `core.gitProxy` name programs for transport.
+    assert.equal(pinned.get('core.fsmonitor'), 'false')
+    assert.equal(pinned.get('core.sshCommand'), 'false')
+    assert.equal(pinned.get('core.gitProxy'), 'false')
+    assert.equal(pinned.get('core.hooksPath'), '/dev/null')
+    assert.equal(pinned.get('core.pager'), 'cat')
+    assert.equal(pinned.get('credential.helper'), '')
+  })
+})
+
+describe('validateArgv: refusals', () => {
+  it('refuses an empty or malformed request', () => {
+    refused([], /non-empty array/)
+    refused(['status', 3], /must be a string/)
+    refused('status', /non-empty array/)
+  })
+
+  it('refuses an unknown subcommand', () => {
+    refused(['frobnicate'], /unknown git subcommand/)
+    refused(['commit-tree'], /unknown git subcommand/)
+  })
+
+  it('refuses a leading option as the subcommand', () => {
+    refused(['--version'], /must be a git subcommand/)
+  })
+
+  it('refuses config injection in the GLOBAL position only', () => {
+    // Measured with git 2.55: after a subcommand, `-c` is that subcommand's own
+    // flag (or an unknown option git rejects itself), never a global one. The
+    // blanket rule this replaces blocked `switch -c`, `commit -C` and `add -u`.
+    refused(['-c', 'core.pager=sh -c evil', 'status'], /must be a git subcommand/)
+    refused(['log', '--config-env=core.pager=EVIL'], /refused/)
+    refused(['log', '--config-env', 'core.pager=EVIL'], /refused/)
+  })
+
+  it('refuses repository-redirecting global options in the global position', () => {
+    for (const option of ['-C', '--git-dir', '--work-tree', '--exec-path', '--bare']) {
+      refused([option, '/elsewhere', 'status'], /must be a git subcommand/)
+    }
+  })
+
+  it('refuses the long forms after a subcommand too, where nothing collides', () => {
+    // These have no meaning as a subcommand flag, so refusing them there is free
+    // defence-in-depth for a git version that might honour them later.
+    for (const option of ['--git-dir', '--work-tree', '--exec-path']) {
+      refused(['status', option, '/elsewhere'], /refused/)
+    }
+  })
+
+  it('refuses the = forms of the same options', () => {
+    refused(['status', '--git-dir=/elsewhere/.git'], /refused/)
+    refused(['status', '--work-tree=/elsewhere'], /refused/)
+    refused(['status', '--exec-path=/tmp/evil'], /refused/)
+  })
+
+  it('refuses an option that names a program for git to run', () => {
+    refused(['ls-remote', '--upload-pack=/tmp/evil', 'origin'], /names a program/)
+    refused(['fetch', '--upload-pack=/tmp/evil', 'origin'], /names a program/)
+    refused(['fetch', '--upload-pack', '/tmp/evil', 'origin'], /names a program/)
+    refused(['push', '--receive-pack=/tmp/evil', 'origin'], /names a program/)
+  })
+
+  it('refuses trailing operands for operations that declare none', () => {
+    refused(['count-objects', 'bogus'], /does not accept a trailing operand/)
+    refused(['ls-files', 'bogus'], /does not accept a trailing operand/)
+    refused(['ls-files', '--stage', 'bogus'], /does not accept a trailing operand/)
+  })
+
+  it('accepts flags for the flag-only operations', () => {
+    allowed(['count-objects', '-v'], 'count-objects')
+    allowed(['ls-files', '--stage'], 'ls-files')
+  })
+})
+
+describe('buildEnv', () => {
+  it('forces the hazardous configuration keys through the environment', () => {
+    const env = buildEnv()
+    const pairs = new Map()
+    for (let index = 0; index < Number(env.GIT_CONFIG_COUNT); index += 1) {
+      pairs.set(env[`GIT_CONFIG_KEY_${index}`], env[`GIT_CONFIG_VALUE_${index}`])
+    }
+    assert.equal(pairs.get('core.pager'), 'cat')
+    assert.equal(pairs.get('core.hooksPath'), '/dev/null')
+    assert.equal(pairs.get('credential.helper'), '')
+  })
+
+  it('hides the user and system configuration by default', () => {
+    const env = buildEnv()
+    assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null')
+    assert.equal(env.GIT_CONFIG_SYSTEM, '/dev/null')
+  })
+
+  it('always hides the user and system configuration', () => {
+    // There is no option to reach them: stored credentials stay unusable either
+    // way, and reading ~/.gitconfig would make behaviour depend on a file outside
+    // the repository while exposing whatever it holds.
+    const env = buildEnv()
+    assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null')
+    assert.equal(env.GIT_CONFIG_SYSTEM, '/dev/null')
+  })
+
+  it('never prompts or pager-waits', () => {
+    const env = buildEnv()
+    assert.equal(env.GIT_TERMINAL_PROMPT, '0')
+    assert.equal(env.GIT_PAGER, 'cat')
+    assert.equal(env.GIT_EDITOR, 'true')
+    assert.equal(env.GIT_ASKPASS, '')
+  })
+})
+
+describe('command composition', () => {
+  it('quotes tokens that need it', () => {
+    assert.equal(shellQuote('status'), 'status')
+    assert.equal(shellQuote('fix: typo'), "'fix: typo'")
+    assert.equal(shellQuote("it's"), `'it'\\''s'`)
+    assert.equal(shellQuote(''), "''")
+    assert.equal(shellQuote('--oneline'), '--oneline')
+    assert.equal(shellQuote('src/a b.js'), "'src/a b.js'")
+  })
+
+  it('composes an argv that survives spaces and glob characters', () => {
+    assert.equal(composeCommand(['add', '--', 'a b.js']), `git add -- 'a b.js'`)
+    assert.equal(composeCommand(['log', '-n', '5']), 'git log -n 5')
+  })
+})
