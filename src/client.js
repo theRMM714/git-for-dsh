@@ -288,6 +288,8 @@ window.__ModuleLoader__.load({
             dangerousKeyPolicy: CATALOG.defaults.dangerousKeyPolicy,
             useHostCredentials: CATALOG.defaults.useHostCredentials === true,
             nativeGitPolicy: CATALOG.defaults.nativeGitPolicy,
+            scanScripts: CATALOG.defaults.scanScripts !== false,
+            sshCommand: CATALOG.defaults.sshCommand,
             pathGuardPolicy: CATALOG.defaults.pathGuardPolicy,
             protectedPaths: [...CATALOG.defaults.protectedPaths],
             proxyPort: CATALOG.defaults.proxyPort,
@@ -303,7 +305,14 @@ window.__ModuleLoader__.load({
             ? section.dangerousKeyPolicy
             : CATALOG.defaults.dangerousKeyPolicy,
           useHostCredentials: section.useHostCredentials === true,
-          nativeGitPolicy: GUARD_COPY.some((entry) => entry.id === section.nativeGitPolicy)
+          // NATIVE_COPY, not GUARD_COPY: the native-git tiers have one more entry
+          // (restrict) than the credential-path ones, and checking the wrong table
+          // silently replaced a valid choice with the default.
+          scanScripts: section.scanScripts !== false,
+          sshCommand: typeof section.sshCommand === 'string' && section.sshCommand.length > 0
+            ? section.sshCommand
+            : CATALOG.defaults.sshCommand,
+          nativeGitPolicy: NATIVE_COPY.some((entry) => entry.id === section.nativeGitPolicy)
             ? section.nativeGitPolicy
             : CATALOG.defaults.nativeGitPolicy,
           pathGuardPolicy: GUARD_COPY.some((entry) => entry.id === section.pathGuardPolicy)
@@ -720,6 +729,29 @@ window.__ModuleLoader__.load({
                   ),
                 }),
                 '逗号分隔',
+              ),
+              row(
+                '检查脚本内容',
+                option(
+                  'scanScripts',
+                  value.scanScripts !== false,
+                  '读取 bash 所执行脚本的内容',
+                  '堵住 bash deploy.sh 这类把 git 藏进脚本的写法。也可能误伤：脚本里只是"提到" git 时会被拒。',
+                ),
+              ),
+              row(
+                'SSH 程序',
+                React.createElement('input', {
+                  type: 'text',
+                  className: 'git-tool-input',
+                  disabled: !canWrite,
+                  'data-writes': 'true',
+                  placeholder: '/usr/bin/ssh',
+                  value: proxyDraft.sshCommand ?? (value.sshCommand ?? CATALOG.defaults.sshCommand),
+                  onChange: (event) => setProxyDraft((previous) => ({ ...previous, sshCommand: event.target.value })),
+                  onBlur: (event) => writePolicy('sshCommand', event.target.value),
+                }),
+                'git 走 SSH 时使用它（由 GIT_SSH_COMMAND 钉死，配置改不了它）',
               ),
               details(
                 '挡得住什么、挡不住什么',

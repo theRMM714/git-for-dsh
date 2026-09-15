@@ -443,7 +443,13 @@ export const ENFORCED_CONFIG = Object.freeze([
    * outranks every config file.
    */
   { key: 'core.fsmonitor', value: 'false' },
-  { key: 'core.sshCommand', value: 'false' },
+  /*
+   * `core.sshCommand` is deliberately NOT here any more. Pinning it to `false` made
+   * SSH impossible through this tool, and a repository that only offers an SSH remote
+   * then had no route at all. It is pinned through the ENVIRONMENT instead
+   * (`GIT_SSH_COMMAND` in `buildEnv`), which outranks every config file and so keeps
+   * the protection: no config can nominate the program git runs as ssh.
+   */
   { key: 'core.gitProxy', value: 'false' },
 ])
 
@@ -789,6 +795,17 @@ export function buildEnv(options = {}) {
   }
 
   /*
+   * The ssh program, pinned through the ENVIRONMENT — which outranks every config file,
+   * so a repository still cannot nominate it. BatchMode forbids an interactive prompt
+   * (the tool's own GIT_TERMINAL_PROMPT does not cover ssh), and accept-new trusts
+   * github.com on first contact, which is the only way a headless push can proceed.
+   */
+  const sshCommand = typeof options.sshCommand === 'string' && options.sshCommand.trim().length > 0
+    ? options.sshCommand.trim()
+    : DEFAULT_SSH_COMMAND
+  env.GIT_SSH_COMMAND = `${sshCommand} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`
+
+  /*
    * `credential.helper` is pinned ONLY while the machine's credentials are hidden.
    * Clearing it was what made every remote write impossible ("could not read
    * Username"), and it bought nothing in return: the credential file is readable by
@@ -894,6 +911,80 @@ export const GUARD_POLICIES = Object.freeze(['deny', 'ask', 'allow'])
 
 /** What the guard does when nothing has been configured. */
 export const DEFAULT_GUARD_POLICY = 'deny'
+
+/**
+ * The ssh program git runs, pinned through the environment.
+ *
+ * One definition, shared by the setting's default and the environment builder. A
+ * non-Linux host points this somewhere else through the setting.
+ */
+export const DEFAULT_SSH_COMMAND = '/usr/bin/ssh'
+
+/**
+ * How much of a script the guard is willing to read.
+ *
+ * The read is synchronous, on the host, for every bash call that names a script, so it
+ * has to be bounded: a FIFO never ends, and a large file would stall the process.
+ */
+export const SCRIPT_SCAN_LIMIT_BYTES = 256 * 1024
+
+/** Shell names whose first non-flag argument is a script path. */
+const SHELL_NAMES = Object.freeze(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'busybox', 'source', '.'])
+
+/**
+ * The script files a shell command appears to run, one level deep.
+ *
+ * Heuristic by nature: it splits on separators and looks at each segment's command
+ * word. It exists so `bash deploy.sh` cannot hide a git invocation behind a filename.
+ * It does not follow what the script then does — a nested script, a here-document, an
+ * interpreter named in a variable, or another language calling git all remain
+ * invisible, and that is documented rather than implied.
+ *
+ * @param command - the shell command text.
+ * @returns the script paths it names, deduplicated, in order.
+ */
+export function findScriptTargets(command) {
+  if (typeof command !== 'string' || command.length === 0) return []
+  const targets = []
+  for (const segment of command.split(/[;&|\n]+/)) {
+    const words = segment.trim().split(/\s+/).filter((word) => word.length > 0)
+    if (words.length === 0) continue
+    // Skip leading wrappers and environment assignments.
+    let index = 0
+    while (index < words.length && (COMMAND_PREFIXES.has(words[index]) || words[index].includes('='))) index += 1
+    const head = words[index]
+    if (head === undefined) continue
+    const bare = head.split('/').slice(-1)[0]
+    if (SHELL_NAMES.includes(bare)) {
+      const argument = words.slice(index + 1).find((word) => !word.startsWith('-'))
+      if (argument !== undefined && !argument.startsWith('$')) targets.push(argument)
+      continue
+    }
+    // A script run directly: ./deploy, ../x.sh, /opt/run.sh
+    if (/\.(sh|bash|zsh|ksh)$/i.test(head) || head.startsWith('./') || head.startsWith('../')) targets.push(head)
+  }
+  return [...new Set(targets.filter((target) => !target.includes('(')))]
+}
+
+/**
+ * Read a script the guard is about to judge.
+ *
+ * @param target - the path the command names.
+ * @param cwd - the session workspace, for relative paths.
+ * @param reader - injectable read/stat pair, so the caller owns the filesystem.
+ * @returns the script text, or undefined when it is not a small regular file.
+ */
+export function readScriptText(target, cwd, reader) {
+  try {
+    const expanded = target.startsWith('~/') ? reader.joinHome(target.slice(2)) : target
+    const absolute = expanded.startsWith('/') ? expanded : reader.join(cwd, expanded)
+    const info = reader.stat(absolute)
+    if (!info.isFile() || info.size > SCRIPT_SCAN_LIMIT_BYTES) return undefined
+    return reader.read(absolute)
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Paths whose CONTENTS are the machine git credentials and identity.

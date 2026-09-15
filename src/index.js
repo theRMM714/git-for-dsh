@@ -39,6 +39,9 @@ import {
   NATIVE_GIT_POLICIES,
   DEFAULT_NATIVE_GIT_POLICY,
   invokesGit,
+  findScriptTargets,
+  readScriptText,
+  DEFAULT_SSH_COMMAND,
   DEFAULT_PROTECTED_PATHS,
   containsNativeGit,
   mentionsProtectedPath,
@@ -52,7 +55,7 @@ import {
   validateArgv,
 } from './git-catalog.js'
 import { probePort, proxyEnvironment, waitForPort } from './proxy.js'
-import { realpathSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 
@@ -144,6 +147,29 @@ export const Config = z.object({
     .union(GUARD_POLICIES.map((policy) => z.const(policy)))
     .default(DEFAULT_GUARD_POLICY)
     .description('What to do when a tool call names a protected credential path: deny (default), ask, or allow.'),
+  /**
+   * Whether the guard also reads a script that a bash command runs.
+   *
+   * `bash deploy.sh` hides a git invocation behind a filename, and this looks one level
+   * into the script to find it. It is a heuristic on top of a heuristic: a nested script,
+   * a here-document, an interpreter named at runtime or another language calling git all
+   * stay invisible, so it is a switch rather than a promise.
+   */
+  scanScripts: z
+    .boolean()
+    .default(true)
+    .description('Read the content of a script a bash command runs, and judge it with the native-git rule. Catches bash deploy.sh; a script that only mentions git may be refused.'),
+  /**
+   * The ssh program git runs.
+   *
+   * Pinned through GIT_SSH_COMMAND, which outranks every config file, so a repository
+   * cannot nominate the program — the same protection core.sshCommand=false gave, but
+   * with SSH still usable.
+   */
+  sshCommand: z
+    .string()
+    .default(DEFAULT_SSH_COMMAND)
+    .description('The ssh program git runs, pinned via GIT_SSH_COMMAND (env outranks config). Change it when ssh lives elsewhere.'),
   /** The paths the guard protects. */
   protectedPaths: z
     .array(z.string())
@@ -198,6 +224,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
   pathGuardPolicy: DEFAULT_GUARD_POLICY,
   protectedPaths: DEFAULT_PROTECTED_PATHS,
+  scanScripts: true,
+  sshCommand: DEFAULT_SSH_COMMAND,
   proxyPort: 0,
   proxyCommand: '',
 })
@@ -398,6 +426,10 @@ function normalizePolicy(value) {
     protectedPaths: Array.isArray(value?.protectedPaths)
       ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
       : [...DEFAULT_PROTECTED_PATHS],
+    scanScripts: value?.scanScripts !== false,
+    sshCommand: typeof value?.sshCommand === 'string' && value.sshCommand.trim().length > 0
+      ? value.sshCommand
+      : DEFAULT_SSH_COMMAND,
     proxyPort: Number.isInteger(value?.proxyPort) && value.proxyPort >= 0 && value.proxyPort <= 65535 ? value.proxyPort : 0,
     proxyCommand: typeof value?.proxyCommand === 'string' ? value.proxyCommand : '',
   }
@@ -556,18 +588,53 @@ function absoluteProtectedPath(entry) {
 }
 
 /**
- * Resolve a tool's path argument the way the tool would.
- * @param raw - the argument as the model wrote it.
- * @param cwd - the session workspace, used for relative arguments.
- * @returns the absolute path, symlinks followed when it exists.
+ * The resolved protected paths and their basenames, cached per activation.
+ *
+ * The cache is keyed by the configured list, so a settings change invalidates it and two
+ * activations never share a stale entry.
+ *
+ * @param paths - the configured protected paths.
+ * @param cache - this activation's cache.
+ * @returns `{ files, names }` for the current configuration.
  */
-function absoluteCandidatePath(raw, cwd) {
+function protectedTargets(paths, cache) {
+  const key = paths.join('\u0000')
+  if (cache.key !== key) {
+    const files = paths.map((entry) => absoluteProtectedPath(entry))
+    cache.key = key
+    cache.files = files
+    cache.names = new Set(files.map((file) => file.split('/').slice(-1)[0]))
+  }
+  return cache
+}
+
+/**
+ * Whether a path argument reaches a protected file, paying for a syscall only when the
+ * name is suspicious.
+ *
+ * The lexical comparison catches the literal path without touching the filesystem. A
+ * symlink needs `realpathSync` to be caught, so it is resolved ONLY when the last
+ * segment matches a protected basename — otherwise every tool call carrying any path
+ * would make a synchronous filesystem call, and on a Windows-mounted workspace that can
+ * stall the DSH process itself.
+ *
+ * @param raw - the argument as the model wrote it.
+ * @param cwd - the session workspace, for relative arguments.
+ * @param protectedFiles - the resolved protected paths.
+ * @param protectedNames - their basenames.
+ * @returns the protected path it reaches, or undefined.
+ */
+function reachesCandidate(raw, cwd, protectedFiles, protectedNames) {
   const expanded = raw.startsWith('~/') ? resolvePath(homedir(), raw.slice(2)) : raw
-  const absolute = isAbsolute(expanded) ? expanded : resolvePath(cwd, expanded)
+  const absolute = isAbsolute(expanded) ? resolvePath(expanded) : resolvePath(cwd, expanded)
+  const direct = reachesProtectedPath(absolute, protectedFiles)
+  if (direct !== undefined) return direct
+  const base = absolute.split('/').slice(-1)[0]
+  if (base === undefined || !protectedNames.has(base)) return undefined
   try {
-    return realpathSync(absolute)
+    return reachesProtectedPath(realpathSync(absolute), protectedFiles)
   } catch {
-    return absolute
+    return undefined
   }
 }
 
@@ -590,12 +657,12 @@ function guardDecision(policy, reason) {
  * @param current - the live policy.
  * @returns a deny/ask decision, or undefined to let the call proceed.
  */
-function inspectToolCall(execution, current) {
+function inspectToolCall(execution, current, cache) {
   const args = execution.arguments
   if (args === null || typeof args !== 'object') return undefined
   const session = execution.agent == null ? undefined : execution.agent.session
   const cwd = session == null ? process.cwd() : session.header.cwd
-  const protectedFiles = current.protectedPaths.map((entry) => absoluteProtectedPath(entry))
+  const { files: protectedFiles, names: protectedNames } = protectedTargets(current.protectedPaths, cache)
 
   if (execution.name === 'bash') {
     const command = typeof args.command === 'string' ? args.command : ''
@@ -618,6 +685,28 @@ function inspectToolCall(execution, current) {
         )
       }
     }
+    /*
+     * One level into a script the command runs. `bash deploy.sh` otherwise hides the
+     * invocation behind a filename, and the matchers above only ever see the command.
+     */
+    if (current.scanScripts === true && current.nativeGitPolicy !== 'allow') {
+      for (const target of findScriptTargets(command)) {
+        const text = readScriptText(target, cwd, {
+          join: (base, rest) => resolvePath(base, rest),
+          joinHome: (rest) => resolvePath(homedir(), rest),
+          stat: statSync,
+          read: (absolute) => readFileSync(absolute, 'utf8'),
+        })
+        if (text === undefined) continue
+        const narrow = current.nativeGitPolicy === 'restrict'
+        if ((narrow ? invokesGit(text) : containsNativeGit(text))) {
+          return guardDecision(
+            current.nativeGitPolicy === 'ask' ? 'ask' : 'deny',
+            `bash 执行的脚本「${target}」里检测到 git 调用，已被本插件拦截（当前策略：${current.nativeGitPolicy}）。请改用 git_exec。`,
+          )
+        }
+      }
+    }
     if (mentionsProtectedPath(command, current.protectedPaths)) {
       return guardDecision(
         current.pathGuardPolicy,
@@ -630,7 +719,7 @@ function inspectToolCall(execution, current) {
   for (const key of ['file_path', 'path']) {
     const raw = args[key]
     if (typeof raw !== 'string' || raw.length === 0) continue
-    const reached = reachesProtectedPath(absoluteCandidatePath(raw, cwd), protectedFiles)
+    const reached = reachesCandidate(raw, cwd, protectedFiles, protectedNames)
     if (reached !== undefined) {
       return guardDecision(
         current.pathGuardPolicy,
@@ -701,9 +790,15 @@ function setup(ctx, entry = {}) {
    * listener delegates by default and absorbs its own failures — a throwing guard
    * would break every tool call in the session.
    */
+  /**
+   * The guard's own cache, per activation: it holds the resolved protected paths so the
+   * per-call cost stays at string comparison. It lives here rather than at module scope
+   * because module state is shared by every activation — the mistake entry 20 records.
+   */
+  const guardCache = { key: undefined, files: [], names: new Set() }
   ctx.on('tools/pre-execute', (execution, next) => {
     try {
-      const decision = inspectToolCall(execution, policy.current)
+      const decision = inspectToolCall(execution, policy.current, guardCache)
       if (decision !== undefined) return decision
     } catch (error) {
       // Absorbed on purpose: a throwing guard would take down every tool call in the
@@ -862,7 +957,13 @@ function setup(ctx, entry = {}) {
         ...(targetWorkdir !== undefined ? { workdir: targetWorkdir } : {}),
         timeoutMs: budget,
         signal: exec.signal,
-        env: { ...buildEnv({ hostCredentials: policy.current.useHostCredentials }), ...proxyEnv },
+        env: {
+          ...buildEnv({
+            hostCredentials: policy.current.useHostCredentials,
+            sshCommand: policy.current.sshCommand,
+          }),
+          ...proxyEnv,
+        },
         // The one deliberate bypass in this plugin. `resolve()` would otherwise
         // stamp the deployment policy (measured as `workspace-write` rooted at
         // the process cwd), and that policy denies `.git` outside it — the whole
