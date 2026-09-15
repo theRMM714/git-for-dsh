@@ -91,7 +91,7 @@ function buildStamp(clientSource) {
 // beside it in `lib/`.
 // Every host module the entry point imports has to be here: a missing one makes
 // `lib/index.js` fail to load at activation.
-for (const file of ['index.js', 'git-catalog.js', 'proxy.js']) {
+for (const file of ['index.js', 'git-catalog.js', 'proxy.js', 'log.js']) {
   copyFileSync(`${root}src/${file}`, `${lib}${file}`)
 }
 
@@ -127,6 +127,9 @@ function serializeCatalog() {
       protectedPaths: [...DEFAULT_PROTECTED_PATHS],
       scanScripts: true,
       sshCommand: DEFAULT_SSH_COMMAND,
+      pluginEnabled: true,
+      logEnabled: true,
+      logPath: '',
       proxyPort: 0,
       proxyCommand: '',
     },

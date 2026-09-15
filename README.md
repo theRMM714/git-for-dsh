@@ -72,7 +72,7 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 `status` 和 `diff` 都是默认放行的只读操作，因此"只放行看状态"实际上等于给了代码执行能力。三处封堵：
 
 - **`config` 只保留读取形式**：最多一个操作数，且不接受 `--unset` / `--add` / `--replace-all` / `--edit` / `-f` 等写入或选文件旗标。`git config user.name X` 会被拒绝。
-- **指定程序的配置键被钉死**：`core.fsmonitor`、`core.sshCommand`、`core.gitProxy` 连同 `core.pager`、`core.hooksPath`、`credential.helper` 一起，通过环境变量注入（优先级高于任何配置文件）。
+- **指定程序的配置键被钉死**：`core.fsmonitor`、`core.gitProxy` 连同 `core.pager`、`core.hooksPath`、`credential.helper` 一起，通过环境变量注入（优先级高于任何配置文件）。**ssh 也在其中，但方式不同**：`GIT_SSH_COMMAND` 被钉成 `<ssh 程序> -o BatchMode=yes -o StrictHostKeyChecking=accept-new`，环境通道同样压过一切配置文件，所以仓库依旧无法指定程序来当 ssh —— 而 SSH 传输仍然可用。
 - **diff 类子命令强制带 `--no-ext-diff --no-textconv`**：`diff.<driver>.command` 是通配键，无法逐个钉死，因此在命令上关闭外部 diff 与 textconv。调用方传 `--ext-diff` / `--textconv` 会被拒绝，无法把它打开。
 
 `scripts/verify-driver-hardening.mjs` 用真实 git 与一个恶意仓库验证这两条路径已关闭，**并且带控制组**（未加固时两个标记都必须出现），否则"没看到标记"可能只是没武装。
@@ -153,6 +153,41 @@ dsh plugin --profile <profile> update git-for-dsh
 
 Host 半注册 `git-tool` 设置命名空间；Client 半通过 `ctx.get('settingsScope')` 绑定同一命名空间写入。**清单本身在构建时从 `src/git-catalog.js` 直接嵌进浏览器产物**（`scripts/build.mjs` 替换 `__GIT_TOOL_CATALOG__`），所以勾选页和 Host 的闸门读的是同一份清单，而浏览器不需要任何通往 Host 的运行时通道 —— 改完目录要重新 `npm run build` 并刷新页面。
 
+### 运行开关：不用重启就能关掉插件
+
+设置页最上面的「启用本插件」是一个**运行时开关**：
+
+- **关闭**：`git_exec` 拒绝调用（并说明这是开关而不是允许清单问题），**工具守卫完全不再拦截**；
+- **立即生效**，无需重启 —— 这是它的用途：做 A/B 对比。怀疑某次卡顿是插件造成的，就关掉它再试同样的操作；关掉还卡，就与插件无关。
+
+（dsh 自带的 Cordis 面板只能管理**动态**插件，管不到 profile 加载的插件行，所以这个开关由本插件自己提供。）
+
+### 诊断日志：卡死时最后一行就是线索
+
+默认开启，写在 `$DSH_HOME/git-for-dsh.log`（设置页可改路径或关掉）。在终端里盯着它：
+
+```sh
+tail -f ~/.dsh/git-for-dsh.log
+```
+
+记什么：
+
+| 行 | 含义 |
+| --- | --- |
+| `activate` | 激活时的策略快照（开关、档位、代理、ssh 程序…） |
+| `guard.enter` | 某次工具调用进入守卫 |
+| `guard.exit` | 守卫的判定与**耗时（毫秒）** |
+| `guard.off` | 插件开关关着，守卫直接放行 |
+| `guard.error` | 守卫自身出错（仍会放行，绝不断调用） |
+| `git_exec.refused` | 因插件关闭而拒绝 |
+
+**诊断卡死的方法**：`guard.enter` 与 `guard.exit` 是**两行**，所以
+
+- 有 `enter` 没有 `exit` → 卡在**守卫内部**；
+- 有 `exit` 之后没有下文 → 卡在**下游**（dsh 的工具派发、文件系统、Windows 侧）。
+
+三条设计约束（都写进了 `src/log.js`）：**流式写入**（任何一次调用都不会等文件系统）、**出错只关日志**（绝不影响工具调用）、**只记长度与判定不记内容**（并额外对凭据 URL 脱敏）—— 转录不是唯一会泄漏令牌的地方。超过 2MB 自动轮转为 `.1`。
+
 ### 工具守卫：拦住"顺手用 bash 跑 git"和"顺手读凭据"
 
 除了 git 的允许清单，插件还装了一个**工具守卫**（`tools/pre-execute` waterfall），对**每一次**工具调用做判定。两项独立设置，档位不同：原生 git 有四档，凭据路径有三档。
@@ -165,6 +200,8 @@ Host 半注册 `git-tool` 设置命名空间；Client 半通过 `ctx.get('settin
 | **限制** | 只在**命令位置**判定：命令开头、`; && \|\| \|` `$(` `(` 之后，或 `sudo`/`env`/`xargs`/`do` 等前缀之后；`sh -c "git …"` 会递归检查引号内 | **不误伤**，但可能漏掉生僻写法（`A=1 git status`、改名的二进制） |
 | **询问** | 判定方式同「限制」，命中时弹一次审批 | — |
 | **允许** | 不拦截 | — |
+
+**检查脚本内容**（默认开，可关）：`bash deploy.sh` 会把 git 调用藏在一个文件名后面，而判别器只看得到命令行。开启后，守卫会**读取该脚本的内容**再判一次 —— 只读**普通文件**、只读**不超过 256 KB**（FIFO 会永久阻塞、大文件会拖死进程，两者都防了），并且**只走一层**：嵌套脚本、here-document、运行时才确定的解释器、或换一种语言调用 git，都看不到。
 
 **凭据 / 身份文件**三档（**禁止**（默认）/ **询问** / **允许**）：判定 `read`/`write`/`edit`/`glob`/`grep` 的路径参数（解析为绝对路径、跟随软链接，**等于**或**包含**受保护文件），以及 bash 命令文本提到它。
 
