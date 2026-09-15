@@ -41,6 +41,8 @@ import {
   invokesGit,
   isShellScriptTarget,
   createBudget,
+  SCRIPT_CHECK_POLICIES,
+  DEFAULT_SCRIPT_CHECK_POLICY,
   DEFAULT_SSH_COMMAND,
   DEFAULT_PROTECTED_PATHS,
   containsNativeGit,
@@ -151,17 +153,38 @@ export const Config = z.object({
     .default(DEFAULT_GUARD_POLICY)
     .description('What to do when a tool call names a protected credential path: deny (default), ask, or allow.'),
   /**
-   * Whether the guard also reads a script that a bash command runs.
+   * How hard to judge a shell script WHEN IT IS WRITTEN.
    *
-   * `bash deploy.sh` hides a git invocation behind a filename, and this looks one level
-   * into the script to find it. It is a heuristic on top of a heuristic: a nested script,
-   * a here-document, an interpreter named at runtime or another language calling git all
-   * stay invisible, so it is a switch rather than a promise.
+   * The content arrives in the call's own arguments, so this costs no filesystem access —
+   * which matters because the guard runs in the DSH process on every tool call. The write
+   * is refused, so the script never lands.
+   *
+   * The tiers exist because "how suspicious is a mention" is the operator's judgement, not
+   * the code's:
+   *
+   *   strict    refuse when the content mentions git at all — catches a script that only
+   *             talks about git, and therefore also catches scripts that are no threat;
+   *   restrict  refuse only when the content actually invokes git, which barely misfires;
+   *   off       do not look at the content.
+   *
+   * The gap is the same at every tier: a script that arrives by other means (a heredoc, a
+   * pull, another tool) is not content-checked, and its command line is still judged by the
+   * ordinary matchers.
+   */
+  scriptCheckPolicy: z
+    // No default: an absent key is what the migration below needs to see.
+    .union(SCRIPT_CHECK_POLICIES.map((policy) => z.const(policy)))
+    .description('How hard to judge a shell script when it is written: strict refuses on any mention of git, restrict only on a real invocation in it (barely misfires), off does not look.'),
+  /**
+   * The boolean this policy replaced.
+   *
+   * Kept in the schema so an existing profile still validates, and read as a fallback by
+   * `normalizePolicy`: true is strict, false is off.
    */
   scanScripts: z
     .boolean()
     .default(true)
-    .description('Judge a shell script when it is written: refuse the write when the content invokes git. Costs no filesystem access. A script arriving by other means is not content-checked.'),
+    .description('Deprecated: superseded by scriptCheckPolicy. true means strict, false means off.'),
   /**
    * The ssh program git runs.
    *
@@ -268,6 +291,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
   pathGuardPolicy: DEFAULT_GUARD_POLICY,
   protectedPaths: DEFAULT_PROTECTED_PATHS,
+  scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
   scanScripts: true,
   heartbeat: false,
   sshCommand: DEFAULT_SSH_COMMAND,
@@ -458,6 +482,20 @@ function bindPolicy(ctx, base) {
  * @param value - a resolved settings section, or the composition entry.
  * @returns the policy the gates read: unknown names dropped, booleans strict.
  */
+/**
+ * The script check's tier, including the boolean that came before it.
+ *
+ * @param value - the stored settings section.
+ * @returns one of SCRIPT_CHECK_POLICIES.
+ */
+function normalizeScriptCheck(value) {
+  const stored = value?.scriptCheckPolicy
+  if (typeof stored === 'string' && SCRIPT_CHECK_POLICIES.includes(stored)) return stored
+  // Migration: an existing profile set the boolean, and that choice must survive.
+  if (value?.scanScripts === false) return 'off'
+  return DEFAULT_SCRIPT_CHECK_POLICY
+}
+
 function normalizePolicy(value) {
   const enabled = Array.isArray(value?.enabled)
     ? value.enabled.filter((item) => typeof item === 'string' && OPERATIONS.has(item))
@@ -474,6 +512,7 @@ function normalizePolicy(value) {
     protectedPaths: Array.isArray(value?.protectedPaths)
       ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
       : [...DEFAULT_PROTECTED_PATHS],
+    scriptCheckPolicy: normalizeScriptCheck(value),
     scanScripts: value?.scanScripts !== false,
     heartbeat: value?.heartbeat === true,
     sshCommand: typeof value?.sshCommand === 'string' && value.sshCommand.trim().length > 0
@@ -926,16 +965,20 @@ function inspectToolCall(execution, current, cache) {
    * stalling the whole application. Refusing here also means the script never lands,
    * instead of existing and being refused when something tries to run it.
    */
-  if (current.scanScripts === true && current.nativeGitPolicy !== 'allow' && (execution.name === 'write' || execution.name === 'edit')) {
+  if (current.scriptCheckPolicy !== 'off' && (execution.name === 'write' || execution.name === 'edit')) {
     const target = typeof args.file_path === 'string' ? args.file_path : ''
     const text = execution.name === 'write' ? args.content : args.new_string
     if (isShellScriptTarget(target, text) && typeof text === 'string') {
-      const narrow = current.nativeGitPolicy === 'restrict'
+      /*
+       * The tier picks the matcher, and it is self-contained on purpose: borrowing the
+       * native-git tier here made one setting mean two different things.
+       */
+      const narrow = current.scriptCheckPolicy === 'restrict'
       if (narrow ? invokesGit(text) : containsNativeGit(text)) {
         return guardDecision(
-          current.nativeGitPolicy === 'ask' ? 'ask' : 'deny',
-          `要写入的脚本「${target}」里检测到 git 调用，已被本插件拦截（当前策略：${current.nativeGitPolicy}）。`
-            + '脚本本身没有生成。若确实需要，请改用 git_exec，或在设置里把「写入脚本时检查内容」改为允许。',
+          'deny',
+          `要写入的脚本「${target}」里检测到 git 调用，已被本插件拦截（脚本检查档位：${current.scriptCheckPolicy}）。`
+            + '脚本本身没有生成。若确实需要，请改用 git_exec，或在设置里把「写入脚本时检查内容」改为「限制」或「关闭」。',
         )
       }
     }

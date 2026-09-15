@@ -35,6 +35,7 @@ import {
   DEFAULT_GUARD_POLICY,
   DEFAULT_NATIVE_GIT_POLICY,
   DEFAULT_SSH_COMMAND,
+  DEFAULT_SCRIPT_CHECK_POLICY,
   DEFAULT_PROTECTED_PATHS,
   describeCatalog,
 } from '../src/git-catalog.js'
@@ -125,6 +126,7 @@ function serializeCatalog() {
       nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
       pathGuardPolicy: DEFAULT_GUARD_POLICY,
       protectedPaths: [...DEFAULT_PROTECTED_PATHS],
+      scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
       scanScripts: true,
       heartbeat: false,
       sshCommand: DEFAULT_SSH_COMMAND,
