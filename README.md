@@ -153,6 +153,14 @@ dsh plugin --profile <profile> update git-for-dsh
 
 Host 半注册 `git-tool` 设置命名空间；Client 半通过 `ctx.get('settingsScope')` 绑定同一命名空间写入。**清单本身在构建时从 `src/git-catalog.js` 直接嵌进浏览器产物**（`scripts/build.mjs` 替换 `__GIT_TOOL_CATALOG__`），所以勾选页和 Host 的闸门读的是同一份清单，而浏览器不需要任何通往 Host 的运行时通道 —— 改完目录要重新 `npm run build` 并刷新页面。
 
+### SSH：程序路径可以探测，不用自己填
+
+设置页「闸门」分组里的 **SSH 程序** 旁边有个 **「探测」** 按钮：它会扫描 `$PATH` 加上常见位置（含 WSL 下的 Windows OpenSSH：`/mnt/c/Windows/System32/OpenSSH/ssh.exe`、Git for Windows 自带的那个），逐个验证**是否可执行**并取版本号，然后把**所有可用的候选列出来**，点一个就填进去 ✓。
+
+- 探测**只在点击时运行** —— 它要访问文件系统，而"点击时访问"没问题、"每次调用都访问"是第 29 条那个坑 ✗；
+- 一个都没找到时会明说：这台机器上 SSH 远端用不了，需要先装 OpenSSH（HTTPS 远端不受影响）；
+- 为什么需要这个选项：程序路径由 `GIT_SSH_COMMAND` 钉死（配置改不了它），所以路径填错就等于 SSH 不可用 —— 而不同发行版/Windows 互操作下它的位置并不统一。
+
 ### 运行开关：不用重启就能关掉插件
 
 设置页最上面的「启用本插件」是一个**运行时开关**：
