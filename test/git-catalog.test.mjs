@@ -330,6 +330,35 @@ describe('hardenArgv', () => {
   })
 })
 
+describe('the matcher always terminates', () => {
+  // The freeze, as a test. Before the fix each of these spun forever inside the guard, so
+  // the suite hanging IS the failure — and `--test-timeout` in package.json turns that into
+  // a report instead of a hang.
+  it('handles every redirection form without looping', () => {
+    assert.equal(invokesGit('echo x > y'), false)
+    assert.equal(invokesGit('echo x < y'), false)
+    assert.equal(invokesGit('make 2>&1'), false)
+    assert.equal(invokesGit('npm test 2>/dev/null'), false)
+    assert.equal(invokesGit('cat < in > out'), false)
+    assert.equal(invokesGit('echo a >> b'), false)
+  })
+
+  it('still sees git on either side of a redirection', () => {
+    assert.equal(invokesGit('git status > out.txt'), true)
+    assert.equal(invokesGit('echo hi > log; git push'), true)
+    assert.equal(invokesGit('npm test 2>&1 | grep x'), false)
+    assert.equal(invokesGit('git log 2>&1 | head -3'), true)
+  })
+
+  it('terminates on awkward shapes', () => {
+    // Whatever the shape, the scanner must consume input: a future branch that forgets
+    // this would hang the harness again.
+    for (const command of ['', ' ', '>>>', '<<<', '=>', 'a<>b', '""', "''", '-c', 'x -c']) {
+      assert.equal(typeof invokesGit(command), 'boolean', JSON.stringify(command))
+    }
+  })
+})
+
 describe('enforced configuration pins the program-naming keys', () => {
   it('neutralizes every key that names a program', () => {
     const pinned = new Map(ENFORCED_CONFIG.map((pair) => [pair.key, pair.value]))

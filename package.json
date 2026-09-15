@@ -36,7 +36,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test \"test/*.test.mjs\"",
+    "test": "node --test --test-timeout=30000 \"test/*.test.mjs\"",
     "pretest": "node scripts/build.mjs",
     "verify": "node scripts/verify-served-bundle.mjs lib/client.js"
   },
