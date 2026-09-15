@@ -904,6 +904,9 @@ function setup(ctx, entry = {}) {
    * between calls" — the question a single unmatched `guard.enter` could not answer.
    */
   ctx.on('tools/post-execute', (execution, result, next) => {
+    // The switch has to silence BOTH listeners: a line per call from this one kept the
+    // plugin in the hot path of every call even while it was "off".
+    if (policy.current.pluginEnabled === false) return next()
     try {
       log.line('tool.done', { tool: execution.name, failed: result?.isError === true })
     } catch {
@@ -936,7 +939,7 @@ function setup(ctx, entry = {}) {
   const heartbeatMs = 5000
   let beats = 0
   const beat = () => {
-    if (policy.current.heartbeat === false) return
+    if (policy.current.pluginEnabled === false || policy.current.heartbeat === false) return
     beats += 1
     if (flight.tool === undefined) {
       log.line('heartbeat', { n: beats, open: 'none' })
@@ -997,7 +1000,19 @@ function setup(ctx, entry = {}) {
     const startedAt = Date.now()
     flight.tool = execution.name
     flight.startedAt = startedAt
-    log.line('guard.enter', { tool: execution.name })
+    /*
+     * A bash call is identified by what it runs. Without this the log says `tool=bash`
+     * and nothing more, which cannot tell a build from a tail — and the freeze reports all
+     * landed on bash calls, so the distinction is the whole question.
+     */
+    const callArgs = execution.arguments
+    const commandPrefix = execution.name === 'bash'
+      && callArgs !== null && typeof callArgs === 'object' && typeof callArgs.command === 'string'
+      ? JSON.stringify(callArgs.command.slice(0, 60))
+      : undefined
+    log.line('guard.enter', commandPrefix === undefined
+      ? { tool: execution.name }
+      : { tool: execution.name, cmd: commandPrefix })
     try {
       const decision = inspectToolCall(execution, policy.current, guardCache)
       flight.tool = undefined
