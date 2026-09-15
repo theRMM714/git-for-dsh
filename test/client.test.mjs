@@ -41,6 +41,7 @@ const SOURCE = readFileSync(CLIENT_PATH, 'utf8')
 /** The expected module id: the package name, not a second copy of it. */
 const PACKAGE_NAME = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')).name
 
+
 /**
  * React as the page provides it. Structural only: these tests are about
  * activation and wiring, not pixels.
@@ -242,6 +243,28 @@ describe('client bundle: loading', () => {
 
   it('resolves every module it requires from the page', () => {
     assert.doesNotThrow(() => loadPlugin())
+  })
+
+  it('decodes every policy id the Host accepts', async () => {
+    // The bug: nativeGitPolicy grew a fourth tier and the decoder kept validating
+    // against the three-entry table, so "限制" rendered as "禁止" — a setting that
+    // appeared to do nothing.
+    const { NATIVE_GIT_POLICIES, GUARD_POLICIES, CONFIG_POLICIES } = await import('../src/git-catalog.js')
+    const { calls } = activate()
+    const decode = calls.bindSpec.decode
+
+    for (const id of NATIVE_GIT_POLICIES) {
+      assert.equal(decode({ nativeGitPolicy: id }).nativeGitPolicy, id, `nativeGitPolicy "${id}" must survive decoding`)
+    }
+    for (const id of GUARD_POLICIES) {
+      assert.equal(decode({ pathGuardPolicy: id }).pathGuardPolicy, id, `pathGuardPolicy "${id}" must survive decoding`)
+    }
+    for (const id of CONFIG_POLICIES) {
+      assert.equal(decode({ dangerousKeyPolicy: id }).dangerousKeyPolicy, id, `dangerousKeyPolicy "${id}" must survive decoding`)
+    }
+
+    // An unknown value still falls back rather than reaching the Host.
+    assert.equal(decode({ nativeGitPolicy: 'nonsense' }).nativeGitPolicy, 'deny')
   })
 
   it('paginates: one tab per group, and only the active panel is not hidden', () => {
@@ -472,6 +495,8 @@ describe('client bundle: activation', () => {
       nativeGitPolicy: 'ask',
       pathGuardPolicy: 'allow',
       protectedPaths: ['~/.git-credentials'],
+      scanScripts: false,
+      sshCommand: '/opt/ssh',
       proxyPort: 7890,
       proxyCommand: 'my-proxy --port 7890',
     })
@@ -483,6 +508,8 @@ describe('client bundle: activation', () => {
       nativeGitPolicy: 'ask',
       pathGuardPolicy: 'allow',
       protectedPaths: ['~/.git-credentials'],
+      scanScripts: false,
+      sshCommand: '/opt/ssh',
       proxyPort: 7890,
       proxyCommand: 'my-proxy --port 7890',
     })

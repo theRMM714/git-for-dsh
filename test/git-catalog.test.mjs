@@ -334,13 +334,24 @@ describe('enforced configuration pins the program-naming keys', () => {
   it('neutralizes every key that names a program', () => {
     const pinned = new Map(ENFORCED_CONFIG.map((pair) => [pair.key, pair.value]))
     // `core.fsmonitor` made `git status` execute a configured program, and
-    // `core.sshCommand` / `core.gitProxy` name programs for transport.
+    // `core.gitProxy` names a program for transport.
     assert.equal(pinned.get('core.fsmonitor'), 'false')
-    assert.equal(pinned.get('core.sshCommand'), 'false')
     assert.equal(pinned.get('core.gitProxy'), 'false')
     assert.equal(pinned.get('core.hooksPath'), '/dev/null')
     assert.equal(pinned.get('core.pager'), 'cat')
     assert.equal(pinned.get('credential.helper'), '')
+  })
+
+  it('pins the ssh program through the ENVIRONMENT instead', () => {
+    // `core.sshCommand=false` made SSH impossible, so a repository offering only an SSH
+    // remote had no route at all. GIT_SSH_COMMAND outranks every config file, which is
+    // the same protection with SSH still usable — and it is non-interactive, because the
+    // tool's GIT_TERMINAL_PROMPT does not cover ssh.
+    const env = buildEnv({ sshCommand: '/opt/ssh' })
+    assert.equal(env.GIT_SSH_COMMAND, '/opt/ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new')
+    assert.equal(ENFORCED_CONFIG.some((pair) => pair.key === 'core.sshCommand'), false)
+    // A blank setting falls back rather than pinning an empty program.
+    assert.match(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, /^\/usr\/bin\/ssh /)
   })
 })
 
