@@ -291,6 +291,7 @@ window.__ModuleLoader__.load({
             nativeGitPolicy: CATALOG.defaults.nativeGitPolicy,
             pluginEnabled: CATALOG.defaults.pluginEnabled !== false,
             logEnabled: CATALOG.defaults.logEnabled !== false,
+            heartbeat: CATALOG.defaults.heartbeat !== false,
             logPath: CATALOG.defaults.logPath,
             scanScripts: CATALOG.defaults.scanScripts !== false,
             sshCommand: CATALOG.defaults.sshCommand,
@@ -314,6 +315,7 @@ window.__ModuleLoader__.load({
           // silently replaced a valid choice with the default.
           pluginEnabled: section.pluginEnabled !== false,
           logEnabled: section.logEnabled !== false,
+          heartbeat: section.heartbeat !== false,
           logPath: typeof section.logPath === 'string' ? section.logPath : CATALOG.defaults.logPath,
           scanScripts: section.scanScripts !== false,
           sshCommand: typeof section.sshCommand === 'string' && section.sshCommand.length > 0
@@ -908,6 +910,12 @@ window.__ModuleLoader__.load({
                 value.logEnabled !== false,
                 '写诊断日志',
                 '每次闸门判定记一行（含耗时），流式写入、脱敏、超过 2MB 自动轮转。卡死前最后一行就是线索，所以默认开启。',
+              ),
+              option(
+                'heartbeat',
+                value.heartbeat !== false,
+                '心跳行',
+                '每 5 秒写一行，并报出"当前有哪个调用卡在半途、卡了多久"。没有它，卡死在闲置时开始和在调用中开始，在日志里长得一模一样。',
               ),
               row(
                 '日志路径',

@@ -512,6 +512,7 @@ describe('client bundle: activation', () => {
       pluginEnabled: false,
       logEnabled: false,
       logPath: '/tmp/probe.log',
+      heartbeat: false,
       proxyPort: 7890,
       proxyCommand: 'my-proxy --port 7890',
     })
@@ -528,6 +529,7 @@ describe('client bundle: activation', () => {
       pluginEnabled: false,
       logEnabled: false,
       logPath: '/tmp/probe.log',
+      heartbeat: false,
       proxyPort: 7890,
       proxyCommand: 'my-proxy --port 7890',
     })
