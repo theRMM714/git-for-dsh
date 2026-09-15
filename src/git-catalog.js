@@ -1094,8 +1094,32 @@ export function invokesGit(command) {
       index += 1
       continue
     }
+    /*
+     * A redirection is a boundary, not a word.
+     *
+     * `<` and `>` end a bare word but are NOT in COMMAND_START, and before this branch
+     * nothing handled them: the word scan matched them immediately, produced an empty
+     * word, and left the index unmoved — so the outer loop span forever. Because this
+     * function runs in the guard on every bash call, ANY command containing a redirection
+     * (`2>&1`, `2>/dev/null`, `> file`) froze the whole DSH process. That was the bug
+     * behind the freeze reports, and it predates the diagnostic log.
+     */
+    if (ch === '<' || ch === '>') {
+      atCommandStart = true
+      index += 1
+      continue
+    }
     const start = index
     while (index < command.length && !WORD_BREAK.has(command[index])) index += 1
+    /*
+     * Belt and braces: whatever a future branch forgets, a pass over this loop consumes at
+     * least one character. A guard that can hang the harness is worse than a guard that
+     * misses a pattern.
+     */
+    if (index === start) {
+      index += 1
+      continue
+    }
     const word = command.slice(start, index)
     if (atCommandStart) {
       if (isGitWord(word)) return true
