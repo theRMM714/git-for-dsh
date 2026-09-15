@@ -22,7 +22,7 @@
  * live allowlist, so the model is told exactly which operations it may use
  * rather than discovering the answer by being refused.
  *
- * @module dsh-plugin-git-tool
+ * @module git-for-dsh
  */
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'

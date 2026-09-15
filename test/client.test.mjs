@@ -20,7 +20,7 @@
  * implements `get(name)` and the context verbs while REFUSING property reads —
  * which is exactly what a declaration-less plugin hits at runtime.
  *
- * @module dsh-plugin-git-tool/test/client
+ * @module git-for-dsh/test/client
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -37,6 +37,9 @@ import { fileURLToPath } from 'node:url'
  */
 const CLIENT_PATH = fileURLToPath(new URL('../lib/client.js', import.meta.url))
 const SOURCE = readFileSync(CLIENT_PATH, 'utf8')
+
+/** The expected module id: the package name, not a second copy of it. */
+const PACKAGE_NAME = JSON.parse(readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8')).name
 
 /**
  * React as the page provides it. Structural only: these tests are about
@@ -219,7 +222,8 @@ describe('client bundle: artifact', () => {
     // The stamp is how a stale page is recognised: a browser can keep an older
     // bundle in memory, which makes a fixed bug look present.
     assert.ok(!SOURCE.includes('__GIT_TOOL_BUILD__'), 'lib/client.js still carries the build token; run: node scripts/build.mjs')
-    assert.match(SOURCE, /const BUILD = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}Z\/[0-9a-f]{8}"/)
+    // A content digest, so rebuilding unchanged sources is byte-identical.
+    assert.match(SOURCE, /const BUILD = "[0-9a-f]{12}"/)
   })
 
   it('embeds the operations the Host enforces', () => {
@@ -233,7 +237,7 @@ describe('client bundle: artifact', () => {
 
 describe('client bundle: loading', () => {
   it('registers one module whose id is the package name', () => {
-    assert.equal(loadPlugin().id, 'dsh-plugin-git-tool')
+    assert.equal(loadPlugin().id, PACKAGE_NAME)
   })
 
   it('resolves every module it requires from the page', () => {

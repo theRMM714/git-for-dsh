@@ -5,7 +5,7 @@
  * proxy the operator configured, and points git at it. That is the whole feature —
  * it exists so nobody has to `export HTTPS_PROXY=…` before launching dsh.
  *
- * @module dsh-plugin-git-tool/proxy
+ * @module git-for-dsh/proxy
  */
 import { connect } from 'node:net'
 

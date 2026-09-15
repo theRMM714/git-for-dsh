@@ -24,7 +24,7 @@
  *
  *   node scripts/build.mjs
  *
- * @module dsh-plugin-git-tool/scripts/build
+ * @module git-for-dsh/scripts/build
  */
 import { createHash } from 'node:crypto'
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -38,7 +38,17 @@ import {
 } from '../src/git-catalog.js'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
-const lib = fileURLToPath(new URL('../lib/', import.meta.url))
+
+/**
+ * Where the build writes.
+ *
+ * `--out <dir>` exists so a verifier can rebuild into a temp directory and compare
+ * against the committed `lib/` without touching it.
+ */
+const outIndex = process.argv.indexOf('--out')
+const lib = outIndex === -1
+  ? fileURLToPath(new URL('../lib/', import.meta.url))
+  : fileURLToPath(new URL(process.argv[outIndex + 1].replace(/\/?$/, '/'), `file://${process.cwd()}/`))
 mkdirSync(lib, { recursive: true })
 
 /** The token `src/client.js` carries where the embedded catalog belongs. */
@@ -46,6 +56,17 @@ const TOKEN = '__GIT_TOOL_CATALOG__'
 
 /** The token `src/client.js` carries where the build stamp belongs. */
 const BUILD_TOKEN = '__GIT_TOOL_BUILD__'
+
+/**
+ * The token `src/client.js` carries where the package name belongs.
+ *
+ * The bundle registers itself under the PACKAGE NAME, so that id and
+ * `package.json` must not be two copies of one string. A test asserts they agree.
+ */
+const PACKAGE_TOKEN = '__GIT_TOOL_PACKAGE__'
+
+/** The package name, read from the manifest rather than restated here. */
+const PACKAGE_NAME = JSON.parse(readFileSync(`${root}package.json`, 'utf8')).name
 
 /**
  * Identify this build.
@@ -58,9 +79,10 @@ const BUILD_TOKEN = '__GIT_TOOL_BUILD__'
  * @returns a short, human-readable build id.
  */
 function buildStamp(clientSource) {
-  const digest = createHash('sha256').update(clientSource).digest('hex').slice(0, 8)
-  const at = new Date().toISOString().replace('T', ' ').slice(0, 16)
-  return `${at}Z/${digest}`
+  // Content, not time: `lib/` is committed, so a rebuild of unchanged sources must
+  // produce byte-identical output. A timestamp would dirty the tree on every test run
+  // and make "is the committed bundle current?" unanswerable.
+  return createHash('sha256').update(clientSource).digest('hex').slice(0, 12)
 }
 
 // Host half: copied verbatim. Its relative import of `./git-catalog.js` resolves
@@ -119,12 +141,18 @@ const clientSource = readFileSync(`${root}src/client.js`, 'utf8')
 if (!clientSource.includes(TOKEN)) {
   throw new Error(`src/client.js does not carry the ${TOKEN} token, so the catalog cannot be embedded`)
 }
+if (!clientSource.includes(PACKAGE_TOKEN)) {
+  throw new Error(`src/client.js does not carry the ${PACKAGE_TOKEN} token, so the bundle would register under a name of its own`)
+}
 if (!clientSource.includes(BUILD_TOKEN)) {
   throw new Error(`src/client.js does not carry the ${BUILD_TOKEN} token, so the build cannot be identified`)
 }
 const serialized = serializeCatalog()
 const stamp = buildStamp(clientSource)
-const client = clientSource.replaceAll(TOKEN, serialized).replaceAll(BUILD_TOKEN, JSON.stringify(stamp))
+const client = clientSource
+  .replaceAll(TOKEN, serialized)
+  .replaceAll(BUILD_TOKEN, JSON.stringify(stamp))
+  .replaceAll(PACKAGE_TOKEN, JSON.stringify(PACKAGE_NAME))
 writeFileSync(`${lib}client.js`, client)
 
 console.log(`built lib/index.js, lib/git-catalog.js, lib/client.js (${operationCount(serialized)} operations embedded, build ${stamp})`)

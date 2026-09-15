@@ -44,10 +44,12 @@
  * `test/client.test.mjs` loads THIS file through the page's own module mechanism
  * and asserts both properties.
  *
- * @module dsh-plugin-git-tool/client
+ * @module git-for-dsh/client
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-plugin-git-tool',
+  // Substituted with the package name at build time: the served module id IS the
+  // package name, and two copies of one string drift.
+  id: __GIT_TOOL_PACKAGE__,
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -333,7 +335,7 @@ window.__ModuleLoader__.load({
 
         const document = globalThis.document
         if (document === undefined || document.head === undefined) return () => {}
-        const tagId = 'dsh-plugin-git-tool/settings.css'
+        const tagId = __GIT_TOOL_PACKAGE__ + '/settings.css'
         const existing = document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']')
         if (existing !== null) return () => existing.remove()
         const tag = document.createElement('style')

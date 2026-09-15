@@ -7,7 +7,7 @@
  * of `validateArgv` alone, so they are checked here through the real `apply()`,
  * the real tool definition, and a real settings scope.
  *
- * @module dsh-plugin-git-tool/test/host.test
+ * @module git-for-dsh/test/host.test
  */
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'

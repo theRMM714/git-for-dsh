@@ -9,7 +9,7 @@
  * `git -c ...` configuration injection, and `validateArgv` is the only place
  * that decision is made.
  *
- * @module dsh-plugin-git-tool/git-catalog
+ * @module git-for-dsh/git-catalog
  */
 
 /**

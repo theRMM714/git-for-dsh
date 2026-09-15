@@ -6,7 +6,7 @@
  * presentation. Run them with `npm test` (Node's built-in test runner, no
  * dependencies).
  *
- * @module dsh-plugin-git-tool/test/git-catalog.test
+ * @module git-for-dsh/test/git-catalog.test
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'

@@ -1,4 +1,4 @@
-# dsh-plugin-git-tool
+# git-for-dsh
 
 ## 免责声明：这是个人测试用的项目，使用这个项目出现任何问题，作者不负任何责任，如果同意再进行使用。
 
@@ -111,21 +111,38 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 
 ## 安装
 
-在 Profile 目录里安装本包并加一行 loader 记录：
+本包装有**自带的补丁层**（`dsh.bundle.patch`）：装包即挂载，**不需要手改任何配置文件**。
 
 ```sh
-dsh plugin --profile <profile> add <本仓库路径>
+# 从 npm（发布后）
+dsh plugin --profile <profile> add git-for-dsh
+
+# 或直接从 GitHub（构建产物 lib/ 已入库，因此不需要构建脚本，也就不需要 allowBuilds 放行）
+dsh plugin --profile <profile> add github:theRMM714/git-for-dsh
+
+# 或本地路径（开发时最省事：link 是符号链接，改完即生效）
+dsh plugin --profile <profile> add /path/to/git-for-dsh
 ```
 
-然后在该 Profile 的 `cordis.patch.yml` 里加入（新增行必须写在 `insert:` 下，这是该 patch 层唯一执行的动作）：
+**更新**同为一条命令：
+
+```sh
+dsh plugin --profile <profile> update git-for-dsh
+```
+
+> 从 GitHub 安装/更新时，shell 里要能访问 github.com。若你的网络需要代理，先 `export HTTPS_PROXY=http://127.0.0.1:<端口>`。
+
+安装做的事（`dsh plugin` 的职责）：pnpm 装包 → 把包加进 profile 的依赖 → **把声明了 `dsh.bundle` 的依赖并入 `dsh.profile.bundles` 层栈**。装载的行来自本包自带的 `cordis.patch.yml`：
 
 ```yaml
 - insert:
     - id: tool-git
-      name: dsh-plugin-git-tool
+      name: git-for-dsh
       # 开发期的刹车：设了 DSH_GIT_TOOL_DISABLED=1 这一行就整个不加载。
       disabled: !!js process.env.DSH_GIT_TOOL_DISABLED === '1'
 ```
+
+若你在 profile 自己的 `cordis.patch.yml` 里重述了同一 `id`，**用户层最后应用、按行覆盖**（不是冲突），所以想改这一行就在那里改。
 
 重启 Profile 后：
 
@@ -257,7 +274,7 @@ Host 半默认对 `write` 与 `remote` 档位的每一次调用弹出审批，�
 
 2. **删掉 patch 里的那三行**。`cordis.patch.yml` 的 `patchReload: live` 会在启动时重新读它；这一步不需要卸载依赖，`package.json` 与 `node_modules` 里的软链留着不影响。
 
-3. **彻底卸载**。`dsh plugin --profile <profile> remove dsh-plugin-git-tool`，再删 patch 里的行。
+3. **彻底卸载**。`dsh plugin --profile <profile> remove git-for-dsh` —— 它同时会把这个依赖从 `dsh.profile.bundles` 里摘掉（reconciler 按已安装状态对齐）。若你曾在 profile 自己的 patch 里重述过该行，再删掉那一行。
 
 **两层兜底**（都在代码里，不依赖你记得用上面的开关）：
 

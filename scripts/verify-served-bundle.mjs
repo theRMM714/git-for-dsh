@@ -20,6 +20,14 @@
  */
 import { readFileSync } from 'node:fs'
 
+/**
+ * The expected module id, read from the manifest.
+ *
+ * The bundle registers under the package name; hardcoding it here would mean a rename
+ * has to be repeated, and a mismatch would look like a bundle bug.
+ */
+const PACKAGE_NAME = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
+
 const file = process.argv[2] ?? '.boot-plugin.js'
 const source = readFileSync(file, 'utf8')
 
@@ -45,8 +53,8 @@ new Function('window', `return (function () { ${source}\n })()`)(window)
 const ids = [...registry.keys()]
 console.log(`served bundle: ${file}`)
 check('registers exactly one module', ids.length === 1, `registered: ${ids.join(', ')}`)
-check('module id is the package name', ids[0] === 'dsh-plugin-git-tool', `got ${ids[0]}`)
-if (!registry.has('dsh-plugin-git-tool')) process.exit(1)
+check('module id is the package name', ids[0] === PACKAGE_NAME, `got ${ids[0]}`)
+if (!registry.has(PACKAGE_NAME)) process.exit(1)
 
 const React = {
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
@@ -59,7 +67,7 @@ const React = {
     render() {}
   },
 }
-const mod = registry.get('dsh-plugin-git-tool')((name) => {
+const mod = registry.get(PACKAGE_NAME)((name) => {
   if (name === 'react') return React
   if (name === 'react/jsx-runtime' || name === '@deepseek-ai/dsh-client-ui-settings') return {}
   throw new Error(`the page cannot resolve module "${name}"`)
