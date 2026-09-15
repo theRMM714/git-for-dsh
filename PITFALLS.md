@@ -22,8 +22,8 @@
 
 ```
 Failed to load plugins
-dsh-plugin-git-tool
-failed to apply loader entry 199c02e5 (dsh-plugin-git-tool): cannot get property "slots" without inject
+git-for-dsh
+failed to apply loader entry 199c02e5 (git-for-dsh): cannot get property "slots" without inject
 ```
 
 **根因**：模块导出的是 `inject: ['settingsScope', ...]`，而代码里读了 `ctx.slots`。Cordis Guard 对**未声明的服务属性读取**直接抛错，而 `apply` 在页面启动流程里执行 → 整个插件加载失败。

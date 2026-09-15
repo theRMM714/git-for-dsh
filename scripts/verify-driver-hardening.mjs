@@ -13,7 +13,7 @@
  *
  *   node scripts/verify-driver-hardening.mjs
  *
- * @module dsh-plugin-git-tool/scripts/verify-driver-hardening
+ * @module git-for-dsh/scripts/verify-driver-hardening
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'

@@ -14,5 +14,5 @@
     # only THIS row — the Host half contains its own failures and logs them, and the
     # Client half degrades the page rather than failing the plugin load.
     - id: tool-git
-      name: dsh-plugin-git-tool
+      name: git-for-dsh
       disabled: !!js process.env.DSH_GIT_TOOL_DISABLED === '1'

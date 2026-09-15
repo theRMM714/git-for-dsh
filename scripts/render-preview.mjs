@@ -15,7 +15,7 @@
  *
  *   node scripts/render-preview.mjs [outFile]
  *
- * @module dsh-plugin-git-tool/scripts/render-preview
+ * @module git-for-dsh/scripts/render-preview
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -40,7 +40,10 @@ const registry = new Map()
 const window = { __ModuleLoader__: { load: (row) => registry.set(row.id, row.factory) } }
 new Function('window', source)(window)
 
-const mod = registry.get('dsh-plugin-git-tool')((name) => {
+/** The module id the bundle registers, read from the manifest. */
+const PACKAGE_NAME = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).name
+
+const mod = registry.get(PACKAGE_NAME)((name) => {
   if (name === 'react') return React
   if (name === 'react/jsx-runtime' || name === '@deepseek-ai/dsh-client-ui-settings') return {}
   throw new Error(`cannot resolve module "${name}"`)

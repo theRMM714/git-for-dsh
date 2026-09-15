@@ -1,8 +1,9 @@
 {
-  "name": "dsh-plugin-git-tool",
-  "private": true,
-  "description": "Allowlisted git execution for DeepSeek Harness: a model-facing git tool that runs outside the file sandbox, with a settings page where the user ticks which git subcommands are permitted",
+  "name": "git-for-dsh",
+  "description": "Allowlisted git execution for DeepSeek Harness: a model-facing git tool that runs outside the file sandbox, with a settings page where the user ticks which git subcommands are permitted and which credential paths the model must not read",
   "type": "module",
+  "_comment": "No version is published in any document or UI. The field below exists only because npm requires one to publish; nothing reads it. src/ is the source of truth — lib/ is committed so that installing from git needs no build step (pnpm 12 gates build scripts behind a per-commit allowBuilds key).",
+  "version": "0.0.0",
   "main": "lib/index.js",
   "exports": {
     ".": {
@@ -19,8 +20,7 @@
     "scripts/**/*.mjs",
     "cordis.patch.yml",
     "README.md",
-    "PITFALLS.md",
-    "AGENT.md"
+    "PITFALLS.md"
   ],
   "dsh": {
     "bundle": {
@@ -36,7 +36,6 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "prepare": "node scripts/build.mjs",
     "test": "node --test \"test/*.test.mjs\"",
     "pretest": "node scripts/build.mjs",
     "verify": "node scripts/verify-served-bundle.mjs lib/client.js"

@@ -15,7 +15,7 @@
  *
  *   node scripts/verify-config-audit.mjs
  *
- * @module dsh-plugin-git-tool/scripts/verify-config-audit
+ * @module git-for-dsh/scripts/verify-config-audit
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'

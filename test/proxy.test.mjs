@@ -5,7 +5,7 @@
  * point of the probe is what the operating system answers, and a mocked one would
  * pass with a probe that cannot work.
  *
- * @module dsh-plugin-git-tool/test/proxy
+ * @module git-for-dsh/test/proxy
  */
 import assert from 'node:assert/strict'
 import { createServer } from 'node:net'
