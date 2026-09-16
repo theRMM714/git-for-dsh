@@ -60,6 +60,10 @@ const React = {
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
   useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
   useEffect: () => {},
+  // The page memoises its derivations, so the stub has to offer the hooks it calls; a stub
+  // missing one fails the render here even though the real React provides it.
+  useMemo: (factory) => factory(),
+  useCallback: (fn) => fn,
   Component: class {
     constructor(props) {
       this.props = props ?? {}
