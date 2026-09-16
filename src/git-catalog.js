@@ -495,6 +495,7 @@ const DRIVER_OPTIONS = Object.freeze(['--ext-diff', '--textconv'])
  */
 const SHORT_FLAG_SCOPES = Object.freeze({
   '-u': Object.freeze(['fetch', 'pull', 'ls-remote']),
+  '-x': Object.freeze(['rebase']),
 })
 
 const EXEC_PROGRAM_OPTIONS = Object.freeze([
