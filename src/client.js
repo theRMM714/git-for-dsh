@@ -392,7 +392,7 @@ window.__ModuleLoader__.load({
             ? section.enabled.filter((name) => typeof name === 'string')
             : [...CATALOG.defaults.enabled],
           approveMutating: section.approveMutating !== false,
-          dangerousKeyPolicy: POLICY_COPY.some((entry) => entry.id === section.dangerousKeyPolicy)
+          dangerousKeyPolicy: isKnownTier('config', section.dangerousKeyPolicy, POLICY_COPY)
             ? section.dangerousKeyPolicy
             : CATALOG.defaults.dangerousKeyPolicy,
           useHostCredentials: section.useHostCredentials === true,
