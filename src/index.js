@@ -48,6 +48,8 @@ import {
   DEFAULT_PROTECTION_ROWS,
   resolveProtectionRows,
   BASH_PATH_MODES,
+  GUARD_ERROR_POLICIES,
+  DEFAULT_GUARD_ERROR_POLICY,
   DEFAULT_BASH_PATH_MODE,
   DEFAULT_TARGET_SCOPE,
   DEFAULT_SSH_COMMAND,
@@ -174,6 +176,16 @@ export const Config = z.object({
       ask: z.boolean(),
     }))
     .description('One row per protected path: read and write allow without asking, ask prompts for every access, nothing ticked means denied.'),
+  /**
+   * What happens when the guard ITSELF fails.
+   *
+   * 'ask' turns the failure into a question the operator answers per call; 'allow' delegates
+   * silently, which is what the guard did before this setting existed.
+   */
+  guardErrorPolicy: z
+    .union(GUARD_ERROR_POLICIES.map((mode) => z.const(mode)))
+    .default(DEFAULT_GUARD_ERROR_POLICY)
+    .description('When the tool guard itself fails: ask (the operator decides that call) or allow (delegate silently).'),
   /** How a path mentioned in a bash command is judged; see BASH_PATH_MODES. */
   bashPathMode: z
     .union(BASH_PATH_MODES.map((mode) => z.const(mode)))
@@ -584,6 +596,9 @@ function normalizePolicy(value) {
     nativeGitPolicy: NATIVE_GIT_POLICIES.includes(value?.nativeGitPolicy)
       ? value.nativeGitPolicy
       : DEFAULT_NATIVE_GIT_POLICY,
+    guardErrorPolicy: GUARD_ERROR_POLICIES.includes(value?.guardErrorPolicy)
+      ? value.guardErrorPolicy
+      : DEFAULT_GUARD_ERROR_POLICY,
     pathRules: resolveProtectionRows(value),
     bashPathMode: BASH_PATH_MODES.includes(value?.bashPathMode) ? value.bashPathMode : DEFAULT_BASH_PATH_MODE,
     scriptCheckPolicy: normalizeScriptCheck(value),
@@ -1780,7 +1795,16 @@ function setup(ctx, entry = {}) {
       // session. The trade-off is that a BROKEN guard looks like a permissive one, so
       // the unit tests drive this listener directly — that is what catches a guard
       // that has stopped judging.
-      ctx.logger?.warn?.(`git-tool: the tool guard failed and delegated: ${error instanceof Error ? error.message : String(error)}`)
+      ctx.logger?.warn?.(`git-tool: the tool guard failed: ${error instanceof Error ? error.message : String(error)}`)
+      // The failure is the guard's, not the command's, and the message says so: the operator is
+      // being asked about a defect, which is what makes a broken guard visible.
+      if ((current.guardErrorPolicy ?? DEFAULT_GUARD_ERROR_POLICY) === 'ask') {
+        return {
+          kind: 'ask',
+          reason: '工具守卫自身出错了（' + (error instanceof Error ? error.message : String(error))
+            + '），因此这次调用是否放行由你决定。这是守卫的缺陷，请把它连同诊断日志一起反馈。',
+        }
+      }
     }
     return next()
   })
