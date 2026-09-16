@@ -521,7 +521,29 @@ describe('enforced configuration pins the program-naming keys', () => {
   })
 })
 
-describe('validateArgv: refusals', () => {
+describe('a credential URL is refused in any position', () => {
+    const url = 'https://alice:s3cr3t@example.com/team/repo.git'
+
+    it('refuses it before and after the separator', () => {
+      refused(['clone', url], /embedded credentials/)
+      refused(['clone', '--', url], /embedded credentials/)
+      refused(['fetch', '--', url], /embedded credentials/)
+    })
+
+    it('names the leak without repeating the secret', () => {
+      const verdict = validateArgv(['clone', '--', url])
+      assert.equal(verdict.ok, false)
+      assert.ok(!verdict.reason.includes('s3cr3t'), 'the message must not carry the secret')
+      assert.match(verdict.reason, /<credentials>/)
+    })
+
+    it('still allows a pathspec that begins with a dash', () => {
+      const verdict = validateArgv(['log', '--', '-weird-name.txt'])
+      assert.equal(verdict.ok, true)
+    })
+  })
+
+  describe('validateArgv: refusals', () => {
   it('refuses an empty or malformed request', () => {
     refused([], /non-empty array/)
     refused(['status', 3], /must be a string/)
