@@ -606,9 +606,8 @@ window.__ModuleLoader__.load({
           /**
            * Add the pending path as a row with every box empty.
            *
-           * One function for the button and for Enter, so the two cannot drift apart. A path that
-           * is already listed is not added twice; the input is cleared either way, because the
-           * operator's intent was to register it.
+           * Shared by the button and by Enter. A path already listed is not added twice, and the
+           * input is cleared either way. Reads the draft, so it must run in this scope.
            */
           const addPendingPath = () => {
             const path = (proxyDraft.newPath ?? '').trim()
@@ -896,7 +895,10 @@ window.__ModuleLoader__.load({
                       }),
                       label,
                     )),
-                    rule.builtin === true
+                    // Derived here rather than trusted from the row: a row that came back
+                    // from a write carries no builtin flag, and the delete button must not
+                    // depend on which of the two paths produced it.
+                    rule.builtin === true || isBuiltinRow(rule.path)
                       ? React.createElement('span', { className: 'git-tool-ruleNote' }, '内置')
                       : React.createElement('button', {
                         type: 'button',
