@@ -956,6 +956,29 @@ describe('host plugin: the tool guard', () => {
     assert.equal(elsewhere.kind, 'delegated')
   })
 
+  it('checks the content an editor-shaped tool writes', async () => {
+    // Its writing command carries the text and names the target 'path', so both the content and
+    // the path have to be read the way that tool spells them.
+    const { recorded } = mount({ settings: settingsWith({ scriptCheckPolicy: 'restrict' }) })
+    const verdict = await decide(recorded, call('str_replace_editor', {
+      command: 'create',
+      path: '/tmp/probe.sh',
+      file_text: '#!/bin/sh\ngit status\n',
+    }))
+    assert.equal(verdict.kind, 'deny')
+    assert.match(verdict.reason, /脚本/)
+  })
+
+  it('judges its reading command as a read', async () => {
+    // view reads, so a row opened for reading permits it — it was judged a write before.
+    const notes = '/home/probe/private-notes.txt'
+    const { recorded } = mount({ settings: settingsWith({ pathRules: [{ path: notes, read: true, write: false, ask: false }] }) })
+    assert.equal(
+      (await decide(recorded, call('str_replace_editor', { command: 'view', path: notes }))).kind,
+      'delegated',
+    )
+  })
+
   it('never breaks a call it cannot judge', async () => {
     // The guard absorbs its own failures: throwing here would take down every tool
     // call in the session, which is worse than the one call it failed to inspect.
