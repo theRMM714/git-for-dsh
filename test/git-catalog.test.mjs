@@ -504,7 +504,7 @@ describe('enforced configuration pins the program-naming keys', () => {
   it('quotes a path with a space, whatever the platform', () => {
     // A macOS install under /Applications, or Git for Windows under Program Files.
     const env = buildEnv({ sshCommand: '/Applications/Some App/bin/ssh' })
-    assert.match(env.GIT_SSH_COMMAND, /^"\/Applications\/Some App\/bin\/ssh" /)
+    assert.match(env.GIT_SSH_COMMAND, /^'\/Applications\/Some App\/bin\/ssh' /)
   })
 
   it('pins the ssh program through the ENVIRONMENT instead', () => {
@@ -513,10 +513,11 @@ describe('enforced configuration pins the program-naming keys', () => {
     // the same protection with SSH still usable — and it is non-interactive, because the
     // tool's GIT_TERMINAL_PROMPT does not cover ssh.
     const env = buildEnv({ sshCommand: '/opt/ssh' })
-    assert.equal(env.GIT_SSH_COMMAND, '"/opt/ssh" -o BatchMode=yes -o StrictHostKeyChecking=accept-new')
+    // A path needing no quoting is left bare, which is the shared quoting rule's fast path.
+    assert.equal(env.GIT_SSH_COMMAND, '/opt/ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new')
     assert.equal(ENFORCED_CONFIG.some((pair) => pair.key === 'core.sshCommand'), false)
     // A blank setting falls back rather than pinning an empty program.
-    assert.match(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, /^"\/usr\/bin\/ssh" /)
+    assert.match(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, /^\/usr\/bin\/ssh -o BatchMode=yes/)
   })
 })
 
