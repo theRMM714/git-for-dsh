@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
 import { apply, applyUnguarded, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
 import { fileStamp } from '../src/index.js'
-import { retiredKeys, guardFailureVerdict } from '../src/index.js'
+import { retiredKeys, guardFailureVerdict, inspectToolCall } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
 
 /**
@@ -715,6 +715,63 @@ describe('host plugin: a guard that has failed', () => {
     // A thrown string must not turn one failure into two.
     assert.match(guardFailureVerdict('ask', 'just a string').reason, /just a string/)
     assert.match(guardFailureVerdict('ask', undefined).reason, /守卫自身出错/)
+  })
+})
+
+describe('the ruling logic is callable on its own', () => {
+  /*
+   * A literal policy, no fixture and no listener: this is what makes the ruling logic testable
+   * by feeding it input, which is how every decision below is stated. The execution is a plain
+   * object too, because the guard reads `arguments` — not `args`.
+   */
+  const policy = {
+    pathRules: [{ path: '/home/me/private', read: true, write: false, ask: false }],
+    bashPathMode: 'heuristic',
+    scriptCheckPolicy: 'restrict',
+    nativeGitPolicy: 'ask',
+    targetScope: 'unrestricted',
+  }
+  const pending = (name, args) => ({ name, arguments: args, agent: undefined })
+  const cache = () => ({ key: undefined, files: [], names: new Set() })
+
+  it('permits a read of a row whose read box is ticked', () => {
+    assert.equal(inspectToolCall(pending('read', { file_path: '/home/me/private/notes.txt' }), policy, cache()), undefined)
+  })
+
+  it('refuses a write to the same row', () => {
+    const verdict = inspectToolCall(pending('write', { file_path: '/home/me/private/notes.txt' }), policy, cache())
+    assert.equal(verdict.kind, 'deny')
+    assert.match(verdict.reason, /路径黑名单/)
+  })
+
+  it('refuses a git_exec argument that names the row', () => {
+    // A write-shaped operation: the row has its read box ticked and its write box empty, and the
+    // heuristic judges `add` as a write. The read side of this same call is permitted below.
+    const verdict = inspectToolCall(
+      pending('git_exec', { argv: ['add', '/home/me/private/notes.txt'] }),
+      policy,
+      cache(),
+    )
+    assert.equal(verdict.kind, 'deny')
+  })
+
+  it('permits a git_exec READ of a row whose read box is ticked', () => {
+    // The same row, the same operand, a read-shaped operation: judged by the shared heuristic.
+    assert.equal(inspectToolCall(
+      pending('git_exec', { argv: ['diff', '--no-index', '/home/me/private/notes.txt', '/dev/null'] }),
+      policy,
+      cache(),
+    ), undefined)
+  })
+
+  it('asks when the row says to ask, whatever the access', () => {
+    const asking = { ...policy, pathRules: [{ path: '/home/me/ask-me', read: false, write: false, ask: true }] }
+    const verdict = inspectToolCall(pending('bash', { command: 'cat /home/me/ask-me/file.txt' }), asking, cache())
+    assert.equal(verdict.kind, 'ask')
+  })
+
+  it('leaves an unrelated call alone', () => {
+    assert.equal(inspectToolCall(pending('read', { file_path: '/tmp/anything.txt' }), policy, cache()), undefined)
   })
 })
 
