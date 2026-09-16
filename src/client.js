@@ -132,6 +132,9 @@ window.__ModuleLoader__.load({
        * obfuscated form). The operator picks which error they prefer.
        */
       /** A built-in row, reset to the defaults this build ships. */
+      /** The same-origin route that reports the configuration health and resets it. */
+      const CONFIG_CHECK_ROUTE = '/git-tool/config-check'
+
       const builtinRows = (rows) => (rows ?? []).map((row) => ({ ...row, builtin: true }))
 
       /** Whether this path is one of the built-in rows. */
@@ -151,6 +154,11 @@ window.__ModuleLoader__.load({
 
       /** A row as the settings document stores it: the boxes, and nothing derived. */
       const storableRow = (row) => ({ path: row.path, read: row.read === true, write: row.write === true, ask: row.ask === true })
+
+      // Asked once, on appear: the answer changes only when the settings file or the schema does.
+      React.useEffect(() => {
+        checkConfiguration()
+      }, [])
 
       /** How a path named in a bash command is judged. Stated as a heuristic, because it is. */
       const BASH_MODE_COPY = [
@@ -630,7 +638,43 @@ window.__ModuleLoader__.load({
             setProxyDraft((previous) => ({ ...previous, newPath: '' }))
           }
 
-          const writePolicy = (field, next) => {
+          /**
+       * The configuration health, as the Host reports it.
+       *
+       * null means not asked yet; an object carries either the retired key names or an error.
+       * The answer cannot be computed here: the page sees a validated section, so a retired key
+       * is indistinguishable from a current one.
+       */
+      const [configHealth, setConfigHealth] = React.useState(null)
+
+      /** Ask the Host which keys the current schema no longer knows. */
+      const checkConfiguration = () => {
+        fetch(CONFIG_CHECK_ROUTE, { headers: { accept: 'application/json' } })
+          .then((response) => response.json())
+          .then((payload) => setConfigHealth({
+            retired: Array.isArray(payload.retired) ? payload.retired.filter((key) => typeof key === 'string') : [],
+            error: typeof payload.error === 'string' ? payload.error : undefined,
+          }))
+          .catch(() => setConfigHealth({ retired: [], error: '无法连接宿主' }))
+      }
+
+      /**
+       * Write an empty section, which falls back to the base and the defaults.
+       *
+       * Destructive by intent: it is the one action that removes the retired keys, and it also
+       * removes every customisation, so the row says so beside the button.
+       */
+      const resetConfiguration = () => {
+        fetch(CONFIG_CHECK_ROUTE, { method: 'POST', headers: { accept: 'application/json' } })
+          .then((response) => response.json())
+          .then((payload) => {
+            if (typeof payload.error === 'string') setConfigHealth({ retired: [], error: payload.error })
+            else checkConfiguration()
+          })
+          .catch(() => setConfigHealth({ retired: [], error: '无法连接宿主' }))
+      }
+
+      const writePolicy = (field, next) => {
             setDraft({ ...value, [field]: next })
             setWriteError(null)
             Promise.resolve(scope.set(field, next)).catch((error) => {
@@ -950,6 +994,35 @@ window.__ModuleLoader__.load({
                 'bash 里的路径判定',
                 segmented('bashPathMode', BASH_MODE_COPY, value.bashPathMode ?? CATALOG.defaults.bashPathMode),
                 '守卫只能看命令文本，所以这一层本质是启发式：明显读按读、明显写按写、其余按写。',
+              ),
+              row(
+                '配置体检',
+                React.createElement(
+                  'div',
+                  { className: 'git-tool-inline' },
+                  React.createElement(
+                    'span',
+                    { className: 'git-tool-ruleNote' },
+                    configHealth === null
+                      ? '检查中…'
+                      : configHealth.error !== undefined
+                        ? '无法检查：' + configHealth.error
+                        : configHealth.retired.length === 0
+                          ? '配置文件与当前版本一致'
+                          : '配置文件里有 ' + String(configHealth.retired.length) + ' 个已退役的键：' + configHealth.retired.join('、'),
+                  ),
+                  React.createElement(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'git-tool-testButton',
+                      disabled: !canWrite,
+                      onClick: resetConfiguration,
+                    },
+                    '一键初始化',
+                  ),
+                ),
+                '一键初始化会写回全部默认值：你所有自定义设置都会丢失，包括黑白名单、目标范围与审批相关选项。',
               ),
               row(
                 '原生 git',
