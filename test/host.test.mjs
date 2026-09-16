@@ -10,13 +10,14 @@
  * @module git-for-dsh/test/host.test
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { symlinkSync, utimesSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
 import { apply, applyUnguarded, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
+import { fileStamp } from '../src/index.js'
 import { retiredKeys } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
 
@@ -651,6 +652,30 @@ describe('host plugin: the configuration health', () => {
     assert.deepEqual(retiredKeys(descriptor(null)), [])
     assert.deepEqual(retiredKeys({}), [], 'no describe to ask')
     assert.deepEqual(retiredKeys({ describe: () => [] }), [], 'the namespace is not registered')
+  })
+})
+
+describe('host plugin: the audit stamp', () => {
+  it('tells two files of the same shape apart', () => {
+    // The hole: a symlink swapped to a file with the same size and mtime left the cached
+    // verdict describing the PREVIOUS file, and that verdict is what decides whether a
+    // repository configuration is dangerous.
+    const dir = mkdtempSync(join(tmpdir(), 'git-tool-stamp-'))
+    const a = join(dir, 'a')
+    const b = join(dir, 'b')
+    writeFileSync(a, 'core.pager=evil')
+    writeFileSync(b, 'core.pager=nice')
+    const when = new Date(1_600_000_000_000)
+    utimesSync(a, when, when)
+    utimesSync(b, when, when)
+    assert.notEqual(fileStamp(a), fileStamp(b), 'same size and mtime, different file')
+
+    // A symlink and its target are the same file, so they agree.
+    const link = join(dir, 'link')
+    symlinkSync(a, link)
+    assert.equal(fileStamp(link), fileStamp(a))
+
+    assert.equal(fileStamp(join(dir, 'missing')), undefined)
   })
 })
 
