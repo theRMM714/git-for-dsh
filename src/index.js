@@ -1318,6 +1318,23 @@ function rowTargets(cache, rowPath) {
 }
 
 /**
+ * The blacklist row a directory falls under, if any.
+ *
+ * Shares the target scope's comparison: resolved paths, compared segment by segment, so a
+ * blacklisted folder covers its subdirectories and a symlink cannot walk out.
+ *
+ * @param rows - the blacklist.
+ * @param target - the directory a command would run in.
+ * @returns the row, or undefined.
+ */
+function matchingPathRow(rows, target) {
+  for (const row of rows ?? []) {
+    if (isInside(target, row.path)) return row
+  }
+  return undefined
+}
+
+/**
  * The verdict for one row, or undefined when the row permits this access.
  *
  * The rule, in one place: permitted when the access's own box is ticked OR when ask is
@@ -1819,7 +1836,30 @@ function setup(ctx, entry = {}) {
        * defaulted to the session workspace further along, so judging the raw argument
        * refused legitimate in-workspace calls for a target of "undefined".
        */
-      const scopeRefusal = targetRefusal(policy.current, workdir ?? sessionWorkspace, sessionWorkspace)
+      const effectiveTarget = workdir ?? sessionWorkspace
+      /*
+       * The blacklist is judged FIRST, because it outranks the target scope: when both would
+       * refuse, the operator needs to change that row, not the scope setting.
+       *
+       * It is also judged on the WORKDIR, which the guard cannot do — it sees tool
+       * arguments, and workdir is neither a file_path nor a path. Without this, a command
+       * could run inside a blacklisted directory and read everything in it.
+       */
+      const blacklisted = matchingPathRow(policy.current.pathRules, effectiveTarget)
+      if (blacklisted !== undefined) {
+        // The operation's own tier decides whether running inside counts as reading or
+        // writing, and anything not plainly a read is treated as a write.
+        const rowVerdict = rowDecision(
+          blacklisted,
+          verdict.operation.risk === 'read' ? 'read' : 'write',
+          `目标目录「${effectiveTarget}」在`,
+        )
+        if (rowVerdict !== undefined) {
+          log.line('git_exec.refused', { reason: 'blacklist', target: effectiveTarget })
+          throw new Error(rowVerdict.reason + '（黑名单优先于「目标范围」）')
+        }
+      }
+      const scopeRefusal = targetRefusal(policy.current, effectiveTarget, sessionWorkspace)
       if (scopeRefusal !== undefined) {
         log.line('git_exec.refused', { reason: 'target-scope', target: workdir })
         throw new Error(scopeRefusal)
