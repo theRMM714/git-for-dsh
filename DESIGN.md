@@ -162,7 +162,7 @@
 - 两个相关包**确实存在**：`dsh-subprocess-local`、`dsh-sandbox-windows-acl`（另有 `dsh-bash-sandbox`、`dsh-pwsh-sandbox` 等并列实现）。
 - 两句报错原文**确实存在**：`terminal inspection is unsupported on platform win32` 在 `dsh-subprocess-local` 的 runner 里，`PTY shell exited during startup` 在 `dsh-terminal-bash` 里。也就是说，出问题的是**交互式 PTY 终端**与**进程检查器**。
 - `MSYSTEM` / `CHERE_INVOKING` 在整个代码树里**搜不到** —— 那是"谁自己手动起 Git Bash 就得自己设"的注意事项，不是 dsh 的缺陷。
-- "受限令牌与 MSYS 共享内存冲突"这一条**未核实**（需要读 `dsh-sandbox-windows-acl` 的实现）。
+- **受限令牌这一条前提成立**：`dsh-sandbox-windows-acl` 的 FFI 绑定表里直接列出 `createRestrictedToken(… restrictingSids …)` 与 `setEntriesInAclW` / `setNamedSecurityInfoW` 等调用，其文档也以"受限令牌进程隔离"自述 —— 沙箱确实在带 restricting SID 的受限令牌下启动被隔离进程，而这正是会打断 Cygwin/MSYS 创建共享内存映射的那类隔离。**仍无法在此验证的**是"MSYS 在该令牌下必然崩溃"这一步（需在真机把 Git Bash 放进该沙箱运行）。
 
 **为什么不采纳**：
 
