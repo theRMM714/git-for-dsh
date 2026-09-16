@@ -385,7 +385,7 @@ describe('client bundle: loading', () => {
     const segments = collect(page, (element) => element.props?.className?.startsWith('git-tool-segItem') === true)
     // Native git has four tiers, credential paths three, dangerous keys four, and the
     // script check three — the toggles are checkboxes, not segments.
-    assert.equal(segments.length, 16)
+    assert.equal(segments.length, 18)
   })
 
   it('explains a non-JSON port-check answer instead of leaking a parse error', () => {
