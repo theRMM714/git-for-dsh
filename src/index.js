@@ -1211,13 +1211,12 @@ function inspectToolCall(execution, current, cache) {
         )
       }
     }
-    for (const group of protectionGroups(current)) {
-      if (!mentionsProtectedPath(command, group.paths)) continue
-      const decision = guardDecision(
-        group.policy,
-        `这条命令提到了${group.label}（本组路径：${group.paths.join('、')}；当前档位：${group.policy === 'allow' ? '允许' : group.policy}）。`
-          + '凭据不需要进入你的上下文 —— 推送认证由 git_exec 内部的 git 自行完成。',
-      )
+    const bashKind = bashAccessKind(command, current.bashPathMode ?? DEFAULT_BASH_PATH_MODE)
+    for (const row of current.pathRules) {
+      if (!mentionsProtectedPath(command, [row.path])) continue
+      // The blacklist outranks the target scope: a path named here is refused on its own
+      // terms, and the message names the row to change.
+      const decision = rowDecision(row, bashKind, `这条命令提到了黑名单路径「${row.path}」`)
       if (decision !== undefined) return decision
     }
   }
@@ -1252,15 +1251,13 @@ function inspectToolCall(execution, current, cache) {
   for (const key of ['file_path', 'path']) {
     const raw = args[key]
     if (typeof raw !== 'string' || raw.length === 0) continue
-    for (const group of protectionGroups(current)) {
-      const targets = groupTargets(cache, group.id, group.paths)
+    // Read or write comes from the tool: file calls say what they are, unlike a shell line.
+    const kind = READ_TOOLS.has(execution.name) ? 'read' : 'write'
+    for (const row of current.pathRules) {
+      const targets = rowTargets(cache, row.path)
       const reached = reachesCandidate(raw, cwd, targets.files, targets.names)
       if (reached === undefined) continue
-      const decision = guardDecision(
-        group.policy,
-        `「${reached}」属于${group.label}，已被本插件保护（当前档位：${group.policy === 'allow' ? '允许' : group.policy}）。`
-          + '它不需要进入你的上下文：认证由 git_exec 内部的 git 自行读取。',
-      )
+      const decision = rowDecision(row, kind, `「${reached}」命中黑名单路径「${row.path}」`)
       if (decision !== undefined) return decision
     }
   }
@@ -1279,28 +1276,68 @@ function inspectToolCall(execution, current, cache) {
  * @param current - the live policy.
  * @returns the groups, in consultation order.
  */
-function protectionGroups(current) {
-  return [
-    {
-      id: 'credentials',
-      label: '本机的 git 凭据文件',
-      paths: CREDENTIAL_PATHS,
-      policy: current.credentialPolicy ?? DEFAULT_CREDENTIAL_POLICY,
-    },
-    {
-      id: 'identity',
-      label: '本机的 git 身份与配置文件',
-      paths: IDENTITY_PATHS,
-      policy: current.identityPolicy ?? DEFAULT_IDENTITY_POLICY,
-    },
-    {
-      id: 'protected',
-      label: '用户加入受保护清单的路径',
-      paths: current.protectedPaths,
-      // Off keeps the list and stops applying it — that was the point of the switch.
-      policy: current.protectedPathsEnabled === false ? 'allow' : 'deny',
-    },
-  ]
+/** Commands that plainly read, for the bash heuristic. */
+const READ_COMMANDS = /\b(cat|less|more|head|tail|grep|egrep|fgrep|rg|awk|cut|diff|wc|file|stat|strings|xxd|od|jq|nl|tac|du)\b/
+
+/** Signs of a write. Checked first: sed -i is a write even though sed is not. */
+const WRITE_MARKERS = /(>>?|\|\s*tee\b|\btee\b|\bcp\b|\bmv\b|\brm\b|\bdd\b|\btruncate\b|\bsed\s+-i|\bpatch\b|\binstall\b|\bshred\b)/
+
+/** Tool names whose path argument is a read, not a write. */
+const READ_TOOLS = new Set(['read', 'grep', 'glob', 'list', 'ls', 'search', 'find'])
+
+/**
+ * Whether a bash command's access to a path counts as a read or a write.
+ *
+ * The guard sees command text, never a file access, so this cannot be more than a heuristic
+ * and the settings page and README say so. write-only skips the guess; the heuristic also
+ * falls back to a write, because the strict side is the safe one.
+ *
+ * @param command - the shell command text.
+ * @param mode - one of BASH_PATH_MODES.
+ * @returns 'read' or 'write'.
+ */
+function bashAccessKind(command, mode) {
+  if (mode !== 'write-only') {
+    if (WRITE_MARKERS.test(command)) return 'write'
+    if (READ_COMMANDS.test(command)) return 'read'
+  }
+  return 'write'
+}
+
+/**
+ * The resolved targets of one row, cached by path.
+ *
+ * @param cache - this activation's cache.
+ * @param rowPath - the row's path.
+ * @returns `{ files, names }` for that row.
+ */
+function rowTargets(cache, rowPath) {
+  cache.rows = cache.rows ?? new Map()
+  if (!cache.rows.has(rowPath)) cache.rows.set(rowPath, { key: undefined, files: [], names: new Set() })
+  return protectedTargets([rowPath], cache.rows.get(rowPath))
+}
+
+/**
+ * The verdict for one row, or undefined when the row permits this access.
+ *
+ * The rule, in one place: permitted when the access's own box is ticked OR when ask is
+ * ticked; ask is also what makes it prompt, and approval allows that one access; nothing
+ * ticked means denied, and denied silently.
+ *
+ * @param row - a blacklist row.
+ * @param kind - 'read' or 'write'.
+ * @param what - what was seen, for the message.
+ * @returns a decision, or undefined.
+ */
+function rowDecision(row, kind, what) {
+  const word = kind === 'read' ? '读' : '写'
+  const guide = '请在设置 → 闸门 → 「路径黑名单」里勾选该行的「' + word + '」，或勾「询问」改为逐次确认。'
+  if (row.ask === true) {
+    return guardDecision('ask', what + '（该行勾选了「询问」，因此每次访问都会先问你）' + guide)
+  }
+  const permitted = kind === 'read' ? row.read === true : row.write === true
+  if (permitted) return undefined
+  return guardDecision('deny', what + '（该行既没勾「' + word + '」也没勾「询问」= 静默禁止）' + guide)
 }
 
 /**

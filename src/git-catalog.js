@@ -1068,7 +1068,9 @@ function protectionRow(entry) {
  */
 export function migrateProtectionRows(value) {
   const byPath = new Map()
-  const stored = Array.isArray(value?.pathRules) ? value.pathRules : undefined
+  // Only a NON-EMPTY list means the new shape is in use: an absent key validates to [], so
+  // emptiness says nothing about the operator's intent (PITFALLS 35, fourth shape).
+  const stored = Array.isArray(value?.pathRules) && value.pathRules.length > 0 ? value.pathRules : undefined
   for (const entry of stored ?? []) {
     if (entry === null || typeof entry !== 'object' || typeof entry.path !== 'string') continue
     if (entry.path.length === 0) continue
