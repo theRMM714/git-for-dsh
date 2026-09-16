@@ -168,9 +168,8 @@ export const Config = z.object({
   /**
    * The blacklist: one row per path, with the read, write and ask boxes.
    *
-   * No schema default: `migrateProtectionRows` reads this key to tell an already-migrated
-   * document from one that still carries the old tiers, and a default would hide the
-   * difference (PITFALLS 35).
+   * No schema default: `migrateProtectionRows` reads this key to decide whether the stored
+   * document already carries a blacklist, and a default would hide that (PITFALLS 35).
    */
   pathRules: z
     .array(z.object({
@@ -195,11 +194,11 @@ export const Config = z.object({
    * whether the operator ever chose (PITFALLS 35).
    */
   /**
-   * The single tier this replaced.
+   * The tier setting `migrateProtectionRows` reads.
    *
-   * Declared for two reasons: an existing profile still validates, and the stored value
-   * reaches normalizePolicy at all — validation drops keys the schema does not declare, which
-   * would make the migration dead code. Deliberately no default: a default fills the key
+   * Declared for two reasons: a stored document still validates, and the value reaches
+   * normalizePolicy at all — validation drops keys the schema does not declare, which would
+   * make the migration dead code. Deliberately no default: a default fills the key
    * first and masks the very value the migration reads (PITFALLS 35).
    */
   pathGuardPolicy: z
@@ -300,8 +299,8 @@ export const Config = z.object({
   /**
    * Where a git command may run.
    *
-   * The workdir arrives in the tool call, and before this existed it was not constrained at
-   * all: the model could point git at any directory on the machine.
+   * The workdir arrives in the tool call and is judged against this: the session workspace
+   * only, the roots listed in `targetPaths`, or anywhere.
    */
   targetScope: z
     .union(TARGET_SCOPES.map((scope) => z.const(scope)))
