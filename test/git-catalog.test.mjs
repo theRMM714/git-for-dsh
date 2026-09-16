@@ -331,6 +331,28 @@ describe('hardenArgv', () => {
   })
 })
 
+describe('shell quoting follows the shell that parses it', () => {
+  it('leaves ordinary tokens bare, and quotes a comma', () => {
+    assert.equal(shellQuote('status'), 'status')
+    assert.equal(shellQuote('--short'), '--short')
+    // PowerShell reads a bare comma as an array separator, so this must be quoted.
+    assert.equal(shellQuote('--pretty=%h,%s'), "'--pretty=%h,%s'")
+  })
+
+  it('escapes an embedded quote the way that shell does', () => {
+    assert.equal(shellQuote("it's", 'sh'), "'it'\\''s'")
+    assert.equal(shellQuote("it's", 'pwsh'), "'it''s'")
+  })
+
+  it('keeps a path with a space or an expansion character literal in both', () => {
+    for (const dialect of ['sh', 'pwsh']) {
+      assert.equal(shellQuote('C:/my docs/x', dialect), "'C:/my docs/x'")
+      assert.equal(shellQuote('a$b', dialect), "'a$b'")
+      assert.equal(shellQuote('a\\b', dialect), "'a\\b'")
+    }
+  })
+})
+
 describe('the matcher always terminates', () => {
   // The freeze, as a test. Before the fix each of these spun forever inside the guard, so
   // the suite hanging IS the failure — and `--test-timeout` in package.json turns that into
