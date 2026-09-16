@@ -1087,8 +1087,10 @@ window.__ModuleLoader__.load({
                     disabled: !canWrite,
                     'data-writes': 'true',
                     placeholder: '/home/me/work\n/mnt/d/projects',
-                    value: proxyDraft.targetPaths ?? (value.targetPaths ?? []).join('\n'),
-                    onChange: (event) => setProxyDraft((previous) => ({ ...previous, targetPaths: event.target.value })),
+                    // Uncontrolled and keyed by the setting, like the other text fields: typing
+                    // costs no re-render, and a change made elsewhere remounts the box.
+                    key: 'targetPaths:' + (value.targetPaths ?? []).join('\n'),
+                    defaultValue: (value.targetPaths ?? []).join('\n'),
                     onBlur: (event) => writePolicy(
                       'targetPaths',
                       event.target.value.split('\n').map((line) => line.trim()).filter((line) => line.length > 0),
