@@ -600,6 +600,38 @@ describe('host plugin: the target scope', () => {
   })
 })
 
+describe('host plugin: the blacklist covers the target directory', () => {
+  const row = (path, extra) => ({ path, read: false, write: false, ask: false, ...extra })
+
+  it('refuses to run inside a blacklisted folder, even where the scope allows it', () => {
+    // The scope is open (unrestricted), so only the blacklist can refuse this — and it must
+    // say which row to change, because that is the setting the operator has to touch.
+    const { definition } = mount({
+      settings: { ...DEFAULT_CONFIG, logEnabled: false, heartbeat: false, targetScope: 'unrestricted', pathRules: [row('/blacklisted')] },
+    })
+    return definition.execute({ ...CALL, argv: ['status'], workdir: '/blacklisted/repo' }, execution()).then(
+      () => assert.fail('a blacklisted target must be refused'),
+      (error) => {
+        assert.match(error.message, /路径黑名单/)
+        assert.match(error.message, /黑名单优先于「目标范围」/)
+      },
+    )
+  })
+
+  it('lets it through once the row permits the access the operation needs', async () => {
+    const { definition } = mount({
+      settings: {
+        ...DEFAULT_CONFIG,
+        logEnabled: false,
+        heartbeat: false,
+        targetScope: 'unrestricted',
+        pathRules: [row('/blacklisted', { read: true })],
+      },
+    })
+    await assert.doesNotReject(() => definition.execute({ ...CALL, argv: ['status'], workdir: '/blacklisted/repo' }, execution()))
+  })
+})
+
 describe('host plugin: the tool guard', () => {
   const PROTECTED = '/home/probe/.git-credentials'
   const settingsWith = (extra) => ({ ...DEFAULT_CONFIG, protectedPaths: [PROTECTED], ...extra })
