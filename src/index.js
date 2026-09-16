@@ -1353,23 +1353,6 @@ function rowDecision(row, kind, what) {
   return guardDecision('deny', what + '（该行既没勾「' + word + '」也没勾「询问」= 静默禁止）' + guide)
 }
 
-/**
- * The resolved targets of one group, cached per group.
- *
- * A group's paths change only when the settings do, so resolving them once is what keeps the
- * per-call cost at string comparison. Each group keeps its own cache entry, so one group's
- * list cannot invalidate another's.
- *
- * @param cache - this activation's cache.
- * @param id - the group's id.
- * @param paths - the group's configured paths.
- * @returns `{ files, names }` for that group.
- */
-function groupTargets(cache, id, paths) {
-  cache.groups = cache.groups ?? {}
-  cache.groups[id] = cache.groups[id] ?? { key: undefined, files: [], names: new Set() }
-  return protectedTargets(paths, cache.groups[id])
-}
 
 /**
  * Resolve a directory for comparison, following symlinks when it exists.
