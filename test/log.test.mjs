@@ -43,6 +43,11 @@ describe('log values', () => {
     const formatted = formatValue('https://user:ghp_EXAMPLE@github.com/o/r.git')
     assert.ok(!formatted.includes('ghp_EXAMPLE'))
     assert.match(formatted, /<redacted>@/)
+
+    // A token with no password is the same leak, and was not covered.
+    const bare = formatValue('clone https://ghp_abcdefghijklmnopqrst@example.com/team/repo')
+    assert.match(bare, /<redacted>@/)
+    assert.ok(!bare.includes('ghp_abcdefghijklmnopqrst'), 'the token must not survive')
   })
 
   it('bounds a long value and says how long it was', () => {
