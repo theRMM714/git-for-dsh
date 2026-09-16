@@ -430,7 +430,7 @@ window.__ModuleLoader__.load({
               builtin: isBuiltinRow(row.path),
             }))
             : builtinRows(CATALOG.defaults.protectionRows),
-          bashPathMode: BASH_MODE_COPY.some((entry) => entry.id === section.bashPathMode)
+          bashPathMode: isKnownTier('bashPathMode', section.bashPathMode, BASH_MODE_COPY)
             ? section.bashPathMode
             : (CATALOG.defaults.bashPathMode ?? 'heuristic'),
           proxyPort: Number.isInteger(section.proxyPort) && section.proxyPort >= 0 && section.proxyPort <= 65535
