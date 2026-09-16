@@ -9,9 +9,9 @@
  *    was applied against a package-level declaration list that holds PACKAGE
  *    names, so the read was rejected and the whole plugin failed to load with
  *    `failed to apply loader entry … cannot get property "slots" without inject`.
- *  - **Declaring the service instead parks the package.** So the fix is not to
- *    declare it: this bundle reads every service with `ctx.get`, the optional
- *    form, and exports NO `inject`.
+ *  - **Declaring the service instead parks the package.** The bundle therefore declares only
+ *    the two it cannot work without — `slots` and `settingsScope` — and reads every other
+ *    service with `ctx.get`, the optional form.
  *  - **A throw during module evaluation failed the load too.** The factory body
  *    is wrapped, so a broken body degrades to a no-op.
  *
