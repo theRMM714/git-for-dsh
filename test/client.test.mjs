@@ -46,14 +46,32 @@ const PACKAGE_NAME = JSON.parse(readFileSync(fileURLToPath(new URL('../package.j
  * React as the page provides it. Structural only: these tests are about
  * activation and wiring, not pixels.
  */
+/**
+ * How many component renders are in progress.
+ *
+ * A hook is only legal during one. React rejects the alternative outright, so a stub that
+ * accepts it hides a page that never activates.
+ */
+let rendering = 0
+
+/** Refuse a hook call that no render is in progress for. */
+function requireRender(name) {
+  if (rendering === 0) {
+    throw new Error('React.' + name + ' was called outside a component render, which React rejects')
+  }
+}
+
 const React = {
   createElement(type, props, ...children) {
     return { type, props: props ?? {}, children }
   },
   useState(initial) {
+    requireRender('useState')
     return [typeof initial === 'function' ? initial() : initial, () => {}]
   },
-  useEffect() {},
+  useEffect() {
+    requireRender('useEffect')
+  },
   Component: class {
     constructor(props) {
       this.props = props ?? {}
@@ -499,8 +517,13 @@ function controlRows(element) {
  */
 function renderPage(calls) {
   const Wrapper = calls.registered.component
-  const Page = Wrapper({}).children[0].type
-  return Page({})
+  rendering += 1
+  try {
+    const Page = Wrapper({}).children[0].type
+    return Page({})
+  } finally {
+    rendering -= 1
+  }
 }
 
 /**
@@ -719,11 +742,18 @@ describe('client bundle: activation', () => {
     assert.ok(JSON.stringify(tree).includes('render exploded'), 'the card names the failure')
   })
 
+  it('refuses a hook called outside a render, as React does', () => {
+    // The guard that would have caught the missing settings page: an effect placed at plugin
+    // scope throws here instead of being silently accepted.
+    assert.throws(() => React.useEffect(() => {}), /outside a component render/)
+    assert.throws(() => React.useState(0), /outside a component render/)
+    assert.doesNotThrow(() => renderPage(activate().calls))
+  })
+
   it('renders status copy before the catalog arrives', () => {
     const { exports, ctx, calls } = loadPlugin()
     exports.apply(ctx)
-    const Page = calls.registered.component({}).children[0].type
-    const tree = Page({})
+    const tree = renderPage(calls)
     assert.equal(tree.props.className, 'git-tool-page')
     assert.ok(JSON.stringify(tree).includes('git-tool-status'))
     assert.ok(JSON.stringify(tree).includes('页面版本'), 'the page names the bundle it is running')
