@@ -22,6 +22,7 @@ import {
   describeCatalog,
   DEFAULT_PROTECTION_ROWS,
   migrateProtectionRows,
+  mentionsProtectedPath,
   hardenArgv,
   invokesGit,
   shellQuote,
@@ -352,6 +353,28 @@ describe('shell quoting follows the shell that parses it', () => {
       assert.equal(shellQuote('a$b', dialect), "'a$b'")
       assert.equal(shellQuote('a\\b', dialect), "'a\\b'")
     }
+  })
+})
+
+describe('a path mention is judged without refusing ordinary work', () => {
+  const builtins = ['~/.gitconfig', '~/.config/git/config', '~/.git-credentials']
+
+  it('does not fire on a common basename', () => {
+    // The defect this replaced: the basename of ~/.config/git/config is "config", so a
+    // substring test refused every command containing that word — including these.
+    assert.equal(mentionsProtectedPath('git config --global user.name', builtins), false)
+    assert.equal(mentionsProtectedPath('git config --list --show-origin', builtins), false)
+  })
+
+  it('still catches the dotfile basename and the full path', () => {
+    assert.equal(mentionsProtectedPath('cat .gitconfig', builtins), true)
+    assert.equal(mentionsProtectedPath('cat ~/.gitconfig', builtins), true)
+    assert.equal(mentionsProtectedPath('cp ~/.config/git/config /tmp/x', builtins), true)
+    assert.equal(mentionsProtectedPath('cat .git-credentials', builtins), true)
+  })
+
+  it('leaves an unrelated command alone', () => {
+    assert.equal(mentionsProtectedPath('npm test 2>&1 | tail -3', builtins), false)
   })
 })
 
