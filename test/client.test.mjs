@@ -261,12 +261,15 @@ describe('client bundle: loading', () => {
     for (const id of NATIVE_GIT_POLICIES) {
       assert.equal(decode({ nativeGitPolicy: id }).nativeGitPolicy, id, `nativeGitPolicy "${id}" must survive decoding`)
     }
-    // The shared tier is gone: credentials and identity each carry their own, and both
-    // must survive decoding against the host's list of tiers.
-    for (const id of GUARD_POLICIES) {
-      assert.equal(decode({ credentialPolicy: id }).credentialPolicy, id, `credentialPolicy "${id}" must survive decoding`)
-      assert.equal(decode({ identityPolicy: id }).identityPolicy, id, `identityPolicy "${id}" must survive decoding`)
-    }
+    // The tiers are gone: a row's boxes are what must survive decoding, because a stored
+    // row that lost a box would silently deny (or silently allow) the wrong operation.
+    const stored = decode({ pathRules: [{ path: '/x', read: true, write: false, ask: true }] })
+    assert.deepEqual(
+      stored.pathRules.map((row) => [row.path, row.read, row.write, row.ask]),
+      [['/x', true, false, true]],
+    )
+    // The built-ins are re-added, so a document that dropped one cannot lose it.
+    assert.ok(stored.pathRules.length > 1, 'the built-in rows come back')
     for (const id of CONFIG_POLICIES) {
       assert.equal(decode({ dangerousKeyPolicy: id }).dangerousKeyPolicy, id, `dangerousKeyPolicy "${id}" must survive decoding`)
     }

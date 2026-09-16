@@ -918,42 +918,6 @@ window.__ModuleLoader__.load({
                 segmented('nativeGitPolicy', NATIVE_COPY, value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy),
               ),
               row(
-                '凭据文件',
-                segmented('credentialPolicy', PATH_COPY, value.credentialPolicy ?? CATALOG.defaults.credentialPolicy),
-                '内置：~/.git-credentials、~/.netrc、~/.authinfo。默认「禁止」，因为它从不需要进入你的上下文。',
-              ),
-              row(
-                '身份与配置文件',
-                segmented('identityPolicy', PATH_COPY, value.identityPolicy ?? CATALOG.defaults.identityPolicy),
-                '内置：~/.gitconfig、~/.config/git/config。默认「询问」，代价低且你有时就想让它读写。与上一条互不影响。',
-              ),
-              row(
-                '启用受保护路径',
-                option(
-                  'protectedPathsEnabled',
-                  value.protectedPathsEnabled !== false,
-                  '按下面清单拦截',
-                  '关闭时清单保留、只是不再拦截 —— 不必为了临时放行而删掉它。这一组独立于上面两条内置规则。',
-                ),
-              ),
-              row(
-                '受保护的路径（清单）',
-                React.createElement('input', {
-                  type: 'text',
-                  className: 'git-tool-input',
-                  disabled: !canWrite,
-                  'data-writes': 'true',
-                  placeholder: '/home/me/private, D:/secrets',
-                  value: proxyDraft.protectedPaths ?? (value.protectedPaths ?? []).join(', '),
-                  onChange: (event) => setProxyDraft((previous) => ({ ...previous, protectedPaths: event.target.value })),
-                  onBlur: (event) => writePolicy(
-                    'protectedPaths',
-                    event.target.value.split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0),
-                  ),
-                }),
-                '逗号分隔',
-              ),
-              row(
                 '目标范围',
                 segmented('targetScope', TARGET_COPY, value.targetScope ?? CATALOG.defaults.targetScope),
                 'git 可以在哪里执行。工作区之外的操作在「仅工作区」下会被拒绝。',
