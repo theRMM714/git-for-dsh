@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
@@ -726,13 +726,32 @@ describe('host plugin: the tool guard', () => {
     )
   })
 
-  it('honours ask and allow', async () => {
+  it('honours ask and allow per group, and keeps the groups independent', async () => {
     const ask = mount({ settings: settingsWith({ nativeGitPolicy: 'ask' }) })
     assert.equal((await decide(ask.recorded, call('bash', { command: 'git status', description: 'x' }))).kind, 'ask')
 
-    const allow = mount({ settings: settingsWith({ nativeGitPolicy: 'allow', pathGuardPolicy: 'allow' }) })
-    assert.equal((await decide(allow.recorded, call('bash', { command: 'git status', description: 'x' }))).kind, 'delegated')
-    assert.equal((await decide(allow.recorded, call('read', { file_path: PROTECTED }))).kind, 'delegated')
+    // Identity files are their own group, so lowering THEIR tier must not touch the
+    // operator's list — which is the whole reason the groups were split.
+    const identity = join(homedir(), '.gitconfig')
+    const askedIdentity = mount({ settings: settingsWith({ identityPolicy: 'ask' }) })
+    assert.equal((await decide(askedIdentity.recorded, call('read', { file_path: identity }))).kind, 'ask')
+
+    const allowed = mount({ settings: settingsWith({ identityPolicy: 'allow' }) })
+    assert.equal((await decide(allowed.recorded, call('read', { file_path: identity }))).kind, 'delegated')
+    assert.equal(
+      (await decide(allowed.recorded, call('read', { file_path: PROTECTED }))).kind,
+      'deny',
+      'the operator list still holds',
+    )
+
+    // Turning the list off keeps it, and leaves the credentials group alone.
+    const listOff = mount({ settings: settingsWith({ protectedPathsEnabled: false }) })
+    assert.equal((await decide(listOff.recorded, call('read', { file_path: PROTECTED }))).kind, 'delegated')
+    assert.equal(
+      (await decide(listOff.recorded, call('bash', { command: 'cat ~/.git-credentials', description: 'x' }))).kind,
+      'deny',
+      'credentials are their own group',
+    )
   })
 
   it('never breaks a call it cannot judge', async () => {

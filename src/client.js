@@ -336,7 +336,9 @@ window.__ModuleLoader__.load({
             targetPaths: [...(CATALOG.defaults.targetPaths ?? [])],
             scanScripts: CATALOG.defaults.scanScripts !== false,
             sshCommand: CATALOG.defaults.sshCommand,
-            pathGuardPolicy: CATALOG.defaults.pathGuardPolicy,
+            protectedPathsEnabled: CATALOG.defaults.protectedPathsEnabled !== false,
+            credentialPolicy: CATALOG.defaults.credentialPolicy,
+            identityPolicy: CATALOG.defaults.identityPolicy,
             protectedPaths: [...CATALOG.defaults.protectedPaths],
             proxyPort: CATALOG.defaults.proxyPort,
             proxyCommand: CATALOG.defaults.proxyCommand,
@@ -374,9 +376,13 @@ window.__ModuleLoader__.load({
           nativeGitPolicy: NATIVE_COPY.some((entry) => entry.id === section.nativeGitPolicy)
             ? section.nativeGitPolicy
             : CATALOG.defaults.nativeGitPolicy,
-          pathGuardPolicy: GUARD_COPY.some((entry) => entry.id === section.pathGuardPolicy)
-            ? section.pathGuardPolicy
-            : CATALOG.defaults.pathGuardPolicy,
+          protectedPathsEnabled: section.protectedPathsEnabled !== false,
+          credentialPolicy: GUARD_COPY.some((entry) => entry.id === section.credentialPolicy)
+            ? section.credentialPolicy
+            : CATALOG.defaults.credentialPolicy,
+          identityPolicy: GUARD_COPY.some((entry) => entry.id === section.identityPolicy)
+            ? section.identityPolicy
+            : CATALOG.defaults.identityPolicy,
           protectedPaths: Array.isArray(section.protectedPaths)
             ? section.protectedPaths.filter((entry) => typeof entry === 'string')
             : [...CATALOG.defaults.protectedPaths],
@@ -839,7 +845,7 @@ window.__ModuleLoader__.load({
               ),
               row(
                 '凭据与身份文件',
-                segmented('pathGuardPolicy', PATH_COPY, value.pathGuardPolicy ?? CATALOG.defaults.pathGuardPolicy),
+                segmented('credentialPolicy', PATH_COPY, value.credentialPolicy ?? CATALOG.defaults.credentialPolicy),
               ),
               row(
                 '受保护的路径',

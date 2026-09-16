@@ -261,8 +261,11 @@ describe('client bundle: loading', () => {
     for (const id of NATIVE_GIT_POLICIES) {
       assert.equal(decode({ nativeGitPolicy: id }).nativeGitPolicy, id, `nativeGitPolicy "${id}" must survive decoding`)
     }
+    // The shared tier is gone: credentials and identity each carry their own, and both
+    // must survive decoding against the host's list of tiers.
     for (const id of GUARD_POLICIES) {
-      assert.equal(decode({ pathGuardPolicy: id }).pathGuardPolicy, id, `pathGuardPolicy "${id}" must survive decoding`)
+      assert.equal(decode({ credentialPolicy: id }).credentialPolicy, id, `credentialPolicy "${id}" must survive decoding`)
+      assert.equal(decode({ identityPolicy: id }).identityPolicy, id, `identityPolicy "${id}" must survive decoding`)
     }
     for (const id of CONFIG_POLICIES) {
       assert.equal(decode({ dangerousKeyPolicy: id }).dangerousKeyPolicy, id, `dangerousKeyPolicy "${id}" must survive decoding`)
@@ -513,7 +516,9 @@ describe('client bundle: activation', () => {
       dangerousKeyPolicy: 'neutralize',
       useHostCredentials: true,
       nativeGitPolicy: 'ask',
-      pathGuardPolicy: 'allow',
+      protectedPathsEnabled: false,
+      credentialPolicy: 'ask',
+      identityPolicy: 'allow',
       protectedPaths: ['~/.git-credentials'],
       scanScripts: false,
       scriptCheckPolicy: 'restrict',
@@ -533,7 +538,9 @@ describe('client bundle: activation', () => {
       dangerousKeyPolicy: 'neutralize',
       useHostCredentials: true,
       nativeGitPolicy: 'ask',
-      pathGuardPolicy: 'allow',
+      protectedPathsEnabled: false,
+      credentialPolicy: 'ask',
+      identityPolicy: 'allow',
       protectedPaths: ['~/.git-credentials'],
       scanScripts: false,
       scriptCheckPolicy: 'restrict',
