@@ -1,9 +1,9 @@
 {
   "name": "git-for-dsh",
-  "description": "Allowlisted git execution for DeepSeek Harness: a model-facing git tool that runs outside the file sandbox, with a settings page where the user ticks which git subcommands are permitted and which credential paths the model must not read",
+  "description": "Allowlisted git execution for DeepSeek Harness: a model-facing git tool that runs outside the file sandbox, with a settings page where the user ticks which git subcommands are permitted and, per path, which reads and writes are allowed, prompted or refused",
   "type": "module",
   "_comment": "No version appears in any document or UI: npm needs this field to publish and the registry needs it to resolve a range, but the code never reads it. src/ is the source of truth — lib/ is committed so that installing from git needs no build step (pnpm gates build scripts behind a per-commit allowBuilds key).",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "license": "MIT",
   "main": "lib/index.js",
   "exports": {
