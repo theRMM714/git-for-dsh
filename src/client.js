@@ -132,6 +132,21 @@ window.__ModuleLoader__.load({
        * narrow one requires a command position (no false refusals, may miss an
        * obfuscated form). The operator picks which error they prefer.
        */
+      /** A built-in row, reset to the defaults this build ships. */
+      const builtinRows = (rows) => (rows ?? []).map((row) => ({ ...row, builtin: true }))
+
+      /** Whether this path is one of the built-in rows. */
+      const isBuiltinRow = (path) => (CATALOG.defaults.protectionRows ?? []).some((row) => row.path === path)
+
+      /** A row as the settings document stores it: the boxes, and nothing derived. */
+      const storableRow = (row) => ({ path: row.path, read: row.read === true, write: row.write === true, ask: row.ask === true })
+
+      /** How a path named in a bash command is judged. Stated as a heuristic, because it is. */
+      const BASH_MODE_COPY = [
+        { id: 'heuristic', label: '启发式', hint: '明显的读命令按读算，明显的写命令按写算，其余一律按写算（保守兜底）。' },
+        { id: 'write-only', label: '一律按写', hint: '任何提到该路径的命令都按写算，所以读一个只勾了「读」的文件也会被拒。' },
+      ]
+
       /** Where git may run. The default is the session's own workspace. */
       const TARGET_COPY = [
         {
@@ -336,10 +351,8 @@ window.__ModuleLoader__.load({
             targetPaths: [...(CATALOG.defaults.targetPaths ?? [])],
             scanScripts: CATALOG.defaults.scanScripts !== false,
             sshCommand: CATALOG.defaults.sshCommand,
-            protectedPathsEnabled: CATALOG.defaults.protectedPathsEnabled !== false,
-            credentialPolicy: CATALOG.defaults.credentialPolicy,
-            identityPolicy: CATALOG.defaults.identityPolicy,
-            protectedPaths: [...CATALOG.defaults.protectedPaths],
+            pathRules: builtinRows(CATALOG.defaults.protectionRows),
+            bashPathMode: CATALOG.defaults.bashPathMode ?? 'heuristic',
             proxyPort: CATALOG.defaults.proxyPort,
             proxyCommand: CATALOG.defaults.proxyCommand,
           }
@@ -376,16 +389,20 @@ window.__ModuleLoader__.load({
           nativeGitPolicy: NATIVE_COPY.some((entry) => entry.id === section.nativeGitPolicy)
             ? section.nativeGitPolicy
             : CATALOG.defaults.nativeGitPolicy,
-          protectedPathsEnabled: section.protectedPathsEnabled !== false,
-          credentialPolicy: GUARD_COPY.some((entry) => entry.id === section.credentialPolicy)
-            ? section.credentialPolicy
-            : CATALOG.defaults.credentialPolicy,
-          identityPolicy: GUARD_COPY.some((entry) => entry.id === section.identityPolicy)
-            ? section.identityPolicy
-            : CATALOG.defaults.identityPolicy,
-          protectedPaths: Array.isArray(section.protectedPaths)
-            ? section.protectedPaths.filter((entry) => typeof entry === 'string')
-            : [...CATALOG.defaults.protectedPaths],
+          pathRules: Array.isArray(section.pathRules) && section.pathRules.length > 0
+            ? section.pathRules.map((row) => ({
+              path: String(row.path),
+              read: row.read === true,
+              write: row.write === true,
+              ask: row.ask === true,
+              // Recomputed here rather than stored: which rows are built in is a property of
+              // this build, not of the operator's document.
+              builtin: isBuiltinRow(row.path),
+            }))
+            : builtinRows(CATALOG.defaults.protectionRows),
+          bashPathMode: BASH_MODE_COPY.some((entry) => entry.id === section.bashPathMode)
+            ? section.bashPathMode
+            : (CATALOG.defaults.bashPathMode ?? 'heuristic'),
           proxyPort: Number.isInteger(section.proxyPort) && section.proxyPort >= 0 && section.proxyPort <= 65535
             ? section.proxyPort
             : CATALOG.defaults.proxyPort,
@@ -839,6 +856,63 @@ window.__ModuleLoader__.load({
               ),
 
               group('闸门'),
+              row(
+                '路径黑名单',
+                React.createElement(
+                  'div',
+                  { className: 'git-tool-ruleList' },
+                  (value.pathRules ?? []).map((rule) => React.createElement(
+                    'div',
+                    { key: rule.path, className: 'git-tool-ruleRow' },
+                    React.createElement('span', { className: 'git-tool-rulePath' }, rule.path),
+                    ...[['read', '读'], ['write', '写'], ['ask', '询问']].map(([box, label]) => React.createElement(
+                      'label',
+                      { key: box, className: 'git-tool-ruleBox' },
+                      React.createElement('input', {
+                        type: 'checkbox',
+                        disabled: !canWrite,
+                        'data-writes': 'true',
+                        checked: rule[box] === true,
+                        onChange: (event) => writePolicy('pathRules', (value.pathRules ?? []).map(
+                          (other) => storableRow(other.path === rule.path ? { ...other, [box]: event.target.checked } : other),
+                        )),
+                      }),
+                      label,
+                    )),
+                    rule.builtin === true
+                      ? React.createElement('span', { className: 'git-tool-ruleNote' }, '内置')
+                      : React.createElement('button', {
+                        type: 'button',
+                        className: 'git-tool-testButton',
+                        disabled: !canWrite,
+                        onClick: () => writePolicy('pathRules', (value.pathRules ?? []).filter((other) => other.path !== rule.path).map(storableRow)),
+                      }, '删除'),
+                  )),
+                  React.createElement('input', {
+                    type: 'text',
+                    className: 'git-tool-input',
+                    disabled: !canWrite,
+                    'data-writes': 'true',
+                    placeholder: '再加一条路径，例如 /home/me/private',
+                    value: proxyDraft.newPath ?? '',
+                    onChange: (event) => setProxyDraft((previous) => ({ ...previous, newPath: event.target.value })),
+                    onBlur: (event) => {
+                      const path = event.target.value.trim()
+                      if (path.length === 0) return
+                      const rows = (value.pathRules ?? []).map(storableRow)
+                      if (rows.some((row) => row.path === path)) return
+                      writePolicy('pathRules', [...rows, { path, read: false, write: false, ask: false }])
+                      setProxyDraft((previous) => ({ ...previous, newPath: '' }))
+                    },
+                  }),
+                ),
+                '每行一条路径：勾「读」或「写」＝静默放行，勾「询问」＝每次访问先问你，三项都不勾＝静默禁止（不打扰你）。内置行不可删除。',
+              ),
+              row(
+                'bash 里的路径判定',
+                segmented('bashPathMode', BASH_MODE_COPY, value.bashPathMode ?? CATALOG.defaults.bashPathMode),
+                '守卫只能看命令文本，所以这一层本质是启发式：明显读按读、明显写按写、其余按写。',
+              ),
               row(
                 '原生 git',
                 segmented('nativeGitPolicy', NATIVE_COPY, value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy),
