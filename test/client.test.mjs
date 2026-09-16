@@ -615,7 +615,7 @@ describe('client bundle: activation', () => {
     // The port test stays usable even when the settings document cannot be written: it
     // only reads the host's state. The log tab's two buttons are reads as well.
     const buttons = collect(page, (element) => element.type === 'button' && element.props?.className === 'git-tool-testButton')
-    assert.equal(buttons.length, 5, 'port test, refresh, clear, the ssh probe and the blacklist add button')
+    assert.equal(buttons.length, 6, 'port test, refresh, clear, the ssh probe, the blacklist add button and the configuration reset')
     for (const button of buttons) assert.notEqual(button.props.disabled, true)
   })
 

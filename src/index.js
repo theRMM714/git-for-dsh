@@ -527,7 +527,7 @@ function bindPolicy(ctx, base) {
  * @param settings - the settings service.
  * @returns the leftover key names, sorted.
  */
-function retiredKeys(settings) {
+export function retiredKeys(settings) {
   if (typeof settings.describe !== 'function') return []
   const descriptor = settings.describe().find((entry) => String(entry.ns) === NAMESPACE)
   const user = descriptor === undefined ? undefined : descriptor.user
