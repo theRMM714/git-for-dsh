@@ -750,15 +750,31 @@ window.__ModuleLoader__.load({
            * beneath. Three radio rows each carrying two lines of prose took three
            * times the height for the same information.
            */
+          /**
+           * The tiers of one field, in the order the HOST accepts them.
+           *
+           * The copy table supplies the wording; the embedded ids supply which tiers exist and
+           * in what order. A tier added on one side and not the other therefore becomes visible
+           * — an unknown id is shown as its own id — instead of silently missing from the page.
+           * Without embedded ids the table's own order stands, so this is inert until the build
+           * provides them.
+           */
+          const tiersFor = (field, copy) => {
+            const ids = CATALOG.defaults.tierIds?.[field]
+            if (!Array.isArray(ids) || ids.length === 0) return copy
+            return ids.map((id) => copy.find((entry) => entry.id === id) ?? { id, label: id, hint: '' })
+          }
+
           const segmented = (field, copy, current) => {
-            const active = copy.find((entry) => entry.id === current) ?? copy[0]
+            const options = tiersFor(field, copy)
+            const active = options.find((entry) => entry.id === current) ?? options[0]
             return React.createElement(
               'div',
               { className: 'git-tool-rowBody' },
               React.createElement(
                 'div',
                 { className: 'git-tool-seg' },
-                copy.map((entry) =>
+                options.map((entry) =>
                   React.createElement(
                     'button',
                     {
