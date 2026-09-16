@@ -40,6 +40,7 @@ import {
   DEFAULT_NATIVE_GIT_POLICY,
   invokesGit,
   isShellScriptTarget,
+  isPathInside,
   createBudget,
   SCRIPT_CHECK_POLICIES,
   DEFAULT_SCRIPT_CHECK_POLICY,
@@ -1437,11 +1438,9 @@ function isInside(target, root) {
   const resolvedTarget = resolvedDirectory(target)
   const resolvedRoot = resolvedDirectory(root)
   if (resolvedTarget === undefined || resolvedRoot === undefined) return false
-  const fold = (value) => (process.platform === 'win32' ? value.toLowerCase() : value)
-  const targetParts = fold(resolvedTarget).split(/[\\/]+/).filter((part) => part.length > 0)
-  const rootParts = fold(resolvedRoot).split(/[\\/]+/).filter((part) => part.length > 0)
-  if (rootParts.length === 0 || rootParts.length > targetParts.length) return false
-  return rootParts.every((part, index) => part === targetParts[index])
+  // Resolving is this side's job (it needs the filesystem); the containment rule itself is
+  // shared with the file-argument rule, so the two cannot drift apart.
+  return isPathInside(resolvedTarget, resolvedRoot)
 }
 
 /**

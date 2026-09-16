@@ -1366,6 +1366,25 @@ export function mentionsProtectedPath(command, protectedPaths) {
 }
 
 /**
+ * One containment predicate, so the file rule and the target rule cannot disagree.
+ *
+ * Compared by path SEGMENT, never as a string prefix: /work/app2 is not inside /work/app.
+ * Windows compares case-insensitively, as its filesystem does.
+ *
+ * @param target - the path to test.
+ * @param root - the path that must contain it.
+ * @returns true when target is root or lies inside it.
+ */
+export function isPathInside(target, root) {
+  if (typeof target !== 'string' || typeof root !== 'string') return false
+  const fold = (value) => (process.platform === 'win32' ? value.toLowerCase() : value)
+  const targetParts = fold(target).split(/[\\/]+/).filter((part) => part.length > 0)
+  const rootParts = fold(root).split(/[\\/]+/).filter((part) => part.length > 0)
+  if (rootParts.length === 0 || rootParts.length > targetParts.length) return false
+  return rootParts.every((part, index) => part === targetParts[index])
+}
+
+/**
  * Whether a path argument reaches a protected file, directly or as its container.
  *
  * The ancestor case matters as much as the equal one: reading a DIRECTORY — or
@@ -1382,6 +1401,9 @@ export function reachesProtectedPath(candidate, protectedFiles) {
     if (candidate === protectedPath) return protectedPath
     const prefix = candidate.endsWith('/') ? candidate : candidate + '/'
     if (protectedPath.startsWith(prefix)) return protectedPath
+    // A file INSIDE a protected directory is protected too: a row may name a directory, and
+    // without this only the directory itself was refused while every file in it went through.
+    if (isPathInside(candidate, protectedPath)) return protectedPath
   }
   return undefined
 }
