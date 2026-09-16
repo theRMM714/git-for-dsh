@@ -602,6 +602,26 @@ describe('host plugin: the target scope', () => {
   })
 })
 
+describe('host plugin: the target is resolved once', () => {
+  it('hands the shell the directory the rules judged', async () => {
+    // A link and its target must not be two different answers: the rules resolve, so the
+    // execution must resolve too, or a swap between them changes where git runs.
+    const root = mkdtempSync(join(tmpdir(), 'git-tool-resolve-'))
+    const real = join(root, 'real')
+    const link = join(root, 'link')
+    mkdirSync(real, { recursive: true })
+    symlinkSync(real, link)
+
+    const { definition, recorded } = mount({ settings: { ...DEFAULT_CONFIG, logEnabled: false, heartbeat: false, targetScope: 'unrestricted' } })
+    await definition.execute({ ...CALL, argv: ['status'], workdir: link }, execution())
+    // The shell must be handed the RESOLVED directory, so a swap between the judgement and the
+    // spawn cannot point it somewhere the rules never saw.
+    const handed = JSON.stringify(recorded.runs)
+    assert.ok(handed.includes(real), 'the resolved directory reaches the shell')
+    assert.ok(!handed.includes(link), 'the link itself is not what git is told to use')
+  })
+})
+
 describe('host plugin: the blacklist covers the target directory', () => {
   const row = (path, extra) => ({ path, read: false, write: false, ask: false, ...extra })
 
