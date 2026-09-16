@@ -754,6 +754,22 @@ describe('host plugin: the tool guard', () => {
     )
   })
 
+  it('migrates the single tier onto the operator list, in the strict direction', async () => {
+    // A profile that only has the old key. 'allow' meant the list was not checked, so it
+    // becomes the list switched off; deny and ask meant enforced, so they become on.
+    const off = mount({ settings: settingsWith({ pathGuardPolicy: 'allow' }) })
+    assert.equal((await decide(off.recorded, call('read', { file_path: PROTECTED }))).kind, 'delegated')
+
+    for (const legacy of ['deny', 'ask']) {
+      const on = mount({ settings: settingsWith({ pathGuardPolicy: legacy }) })
+      assert.equal(
+        (await decide(on.recorded, call('read', { file_path: PROTECTED }))).kind,
+        'deny',
+        'legacy ' + legacy + ' must keep the list enforced',
+      )
+    }
+  })
+
   it('never breaks a call it cannot judge', async () => {
     // The guard absorbs its own failures: throwing here would take down every tool
     // call in the session, which is worse than the one call it failed to inspect.
