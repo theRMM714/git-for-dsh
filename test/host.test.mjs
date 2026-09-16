@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
 import { apply, applyUnguarded, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
 import { fileStamp } from '../src/index.js'
-import { retiredKeys } from '../src/index.js'
+import { retiredKeys, guardFailureVerdict } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
 
 /**
@@ -676,6 +676,25 @@ describe('host plugin: the audit stamp', () => {
     assert.equal(fileStamp(link), fileStamp(a))
 
     assert.equal(fileStamp(join(dir, 'missing')), undefined)
+  })
+})
+
+describe('host plugin: a guard that has failed', () => {
+  it('asks by default, so the defect is never silent', () => {
+    const asked = guardFailureVerdict('ask', new Error('boom'))
+    assert.equal(asked.kind, 'ask')
+    assert.match(asked.reason, /守卫自身出错/)
+    assert.match(asked.reason, /boom/, 'the cause is named, so the report is useful')
+  })
+
+  it('delegates when the operator chose to live with it', () => {
+    assert.equal(guardFailureVerdict('allow', new Error('boom')), undefined)
+  })
+
+  it('survives a thrown value that is not an error', () => {
+    // A thrown string must not turn one failure into two.
+    assert.match(guardFailureVerdict('ask', 'just a string').reason, /just a string/)
+    assert.match(guardFailureVerdict('ask', undefined).reason, /守卫自身出错/)
   })
 })
 
