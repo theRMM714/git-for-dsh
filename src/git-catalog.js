@@ -1039,8 +1039,6 @@ export const DEFAULT_PROTECTION_ROWS = Object.freeze([
   { path: '~/.config/git/config', read: false, write: false, ask: false, builtin: true },
 ])
 
-/** The built-in paths, for restoring a row the stored document dropped. */
-export const BUILTIN_PROTECTION_PATHS = Object.freeze(DEFAULT_PROTECTION_ROWS.map((row) => row.path))
 
 /**
  * How a path mentioned in a BASH command is judged.
@@ -1536,11 +1534,3 @@ export function describeCatalog() {
   })
 }
 
-/**
- * Flat rows for one risk tier, for callers that want a simple list.
- * @param risk - the tier to filter by.
- * @returns catalog entries of that tier, in catalog order.
- */
-export function operationsOfRisk(risk) {
-  return CATALOG.filter((group) => group.risk === risk).flatMap((group) => group.operations)
-}
