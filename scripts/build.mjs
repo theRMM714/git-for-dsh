@@ -81,17 +81,21 @@ const PACKAGE_NAME = JSON.parse(readFileSync(`${root}package.json`, 'utf8')).nam
  * Identify this build.
  *
  * A page can keep an older bundle in memory until it is reloaded, which makes a
- * fixed bug look present. The stamp is shown on the page so the two can be told
+ * fixed bug look present. The stamp covers every input of the build — the Host and client
+ * sources and the embedded catalog — so it changes whenever anything the page runs changes,
+ * and it is shown on the page so a stale bundle can be recognised at a glance.
+ *
+ * The stamp is shown on the page so the two can be told
  * apart without guessing.
  *
- * @param clientSource - the client source being written.
+ * @param parts - every input of the build, hashed in order.
  * @returns a short, human-readable build id.
  */
-function buildStamp(clientSource) {
+function buildStamp(parts) {
   // Content, not time: `lib/` is committed, so a rebuild of unchanged sources must
   // produce byte-identical output. A timestamp would dirty the tree on every test run
   // and make "is the committed bundle current?" unanswerable.
-  return createHash('sha256').update(clientSource).digest('hex').slice(0, 12)
+  return createHash('sha256').update(parts.join('\u0000')).digest('hex').slice(0, 12)
 }
 
 // Host half: copied verbatim. Its relative import of `./git-catalog.js` resolves
@@ -171,7 +175,11 @@ if (!clientSource.includes(BUILD_TOKEN)) {
   throw new Error(`src/client.js does not carry the ${BUILD_TOKEN} token, so the build cannot be identified`)
 }
 const serialized = serializeCatalog()
-const stamp = buildStamp(clientSource)
+const stamp = buildStamp([
+  ...['index.js', 'git-catalog.js', 'proxy.js', 'log.js'].map((file) => readFileSync(`${root}src/${file}`, 'utf8')),
+  clientSource,
+  serialized,
+])
 const client = clientSource
   .replaceAll(TOKEN, serialized)
   .replaceAll(BUILD_TOKEN, JSON.stringify(stamp))
