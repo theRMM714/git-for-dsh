@@ -726,48 +726,50 @@ describe('host plugin: the tool guard', () => {
     )
   })
 
-  it('honours ask and allow per group, and keeps the groups independent', async () => {
+  it('judges each blacklist row on its own boxes', async () => {
     const ask = mount({ settings: settingsWith({ nativeGitPolicy: 'ask' }) })
     assert.equal((await decide(ask.recorded, call('bash', { command: 'git status', description: 'x' }))).kind, 'ask')
 
-    // Identity files are their own group, so lowering THEIR tier must not touch the
-    // operator's list — which is the whole reason the groups were split.
+    // Identity: the default migrates to the ask box, so a read prompts; opening it to
+    // read+write lets the same read through without asking.
     const identity = join(homedir(), '.gitconfig')
-    const askedIdentity = mount({ settings: settingsWith({ identityPolicy: 'ask' }) })
-    assert.equal((await decide(askedIdentity.recorded, call('read', { file_path: identity }))).kind, 'ask')
+    const asked = mount({ settings: settingsWith({ identityPolicy: 'ask' }) })
+    assert.equal((await decide(asked.recorded, call('read', { file_path: identity }))).kind, 'ask')
 
-    const allowed = mount({ settings: settingsWith({ identityPolicy: 'allow' }) })
-    assert.equal((await decide(allowed.recorded, call('read', { file_path: identity }))).kind, 'delegated')
+    const opened = mount({ settings: settingsWith({ identityPolicy: 'allow' }) })
+    assert.equal((await decide(opened.recorded, call('read', { file_path: identity }))).kind, 'delegated')
+    // ...while the operator's own row, ticked nowhere, is still denied: rows are independent.
+    assert.equal((await decide(opened.recorded, call('read', { file_path: PROTECTED }))).kind, 'deny')
+
+    // Credentials start with nothing ticked: denied silently, and the message names the row.
+    const denied = await decide(opened.recorded, call('bash', { command: 'cat ~/.git-credentials', description: 'x' }))
+    assert.equal(denied.kind, 'deny')
+    assert.match(denied.reason, /路径黑名单/)
+
+    // The bash tier decides how a mention is judged; write-only counts a plain read as a
+    // write, which matters once only the read box is ticked.
+    const readOnly = mount({
+      settings: settingsWith({
+        pathRules: [{ path: '~/.gitconfig', read: true, write: false, ask: false }],
+        bashPathMode: 'heuristic',
+      }),
+    })
     assert.equal(
-      (await decide(allowed.recorded, call('read', { file_path: PROTECTED }))).kind,
-      'deny',
-      'the operator list still holds',
+      (await decide(readOnly.recorded, call('bash', { command: 'cat ~/.gitconfig', description: 'x' }))).kind,
+      'delegated',
+      'heuristic: cat is a read, and the read box is ticked',
     )
-
-    // Turning the list off keeps it, and leaves the credentials group alone.
-    const listOff = mount({ settings: settingsWith({ protectedPathsEnabled: false }) })
-    assert.equal((await decide(listOff.recorded, call('read', { file_path: PROTECTED }))).kind, 'delegated')
+    const writeOnly = mount({
+      settings: settingsWith({
+        pathRules: [{ path: '~/.gitconfig', read: true, write: false, ask: false }],
+        bashPathMode: 'write-only',
+      }),
+    })
     assert.equal(
-      (await decide(listOff.recorded, call('bash', { command: 'cat ~/.git-credentials', description: 'x' }))).kind,
+      (await decide(writeOnly.recorded, call('bash', { command: 'cat ~/.gitconfig', description: 'x' }))).kind,
       'deny',
-      'credentials are their own group',
+      'write-only: the same mention counts as a write, and the write box is empty',
     )
-  })
-
-  it('migrates the single tier onto the operator list, in the strict direction', async () => {
-    // A profile that only has the old key. 'allow' meant the list was not checked, so it
-    // becomes the list switched off; deny and ask meant enforced, so they become on.
-    const off = mount({ settings: settingsWith({ pathGuardPolicy: 'allow' }) })
-    assert.equal((await decide(off.recorded, call('read', { file_path: PROTECTED }))).kind, 'delegated')
-
-    for (const legacy of ['deny', 'ask']) {
-      const on = mount({ settings: settingsWith({ pathGuardPolicy: legacy }) })
-      assert.equal(
-        (await decide(on.recorded, call('read', { file_path: PROTECTED }))).kind,
-        'deny',
-        'legacy ' + legacy + ' must keep the list enforced',
-      )
-    }
   })
 
   it('never breaks a call it cannot judge', async () => {
