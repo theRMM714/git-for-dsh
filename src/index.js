@@ -163,7 +163,6 @@ export const Config = z.object({
    */
   protectedPathsEnabled: z
     .boolean()
-    .default(DEFAULT_PROTECTED_PATHS_ENABLED)
     .description('Enforce the protected-paths list. Off means the list is kept but not applied.'),
   /**
    * The built-in credential files.
@@ -171,6 +170,17 @@ export const Config = z.object({
    * No schema default: this key is read by the migration below, and a default would mask
    * whether the operator ever chose (PITFALLS 35).
    */
+  /**
+   * The single tier this replaced.
+   *
+   * Declared for two reasons: an existing profile still validates, and the stored value
+   * reaches normalizePolicy at all — validation drops keys the schema does not declare, which
+   * would make the migration dead code. Deliberately no default: a default fills the key
+   * first and masks the very value the migration reads (PITFALLS 35).
+   */
+  pathGuardPolicy: z
+    .union(GUARD_POLICIES.map((policy) => z.const(policy)))
+    .description('Deprecated: superseded by protectedPathsEnabled, credentialPolicy and identityPolicy.'),
   credentialPolicy: z
     .union(GUARD_POLICIES.map((policy) => z.const(policy)))
     .description('What to do when a tool call names a stored credential file: deny (default), ask, or allow.'),
@@ -555,10 +565,17 @@ function normalizeScriptCheck(value) {
  * @returns true when the list should be enforced.
  */
 function normalizeProtectedEnabled(value) {
-  if (typeof value?.protectedPathsEnabled === 'boolean') return value.protectedPathsEnabled
+  const enabled = value?.protectedPathsEnabled
+  /*
+   * The default value does NOT mean "unset" here: the plugin's own base object spreads
+   * DEFAULT_CONFIG, so this key is always present and cannot be distinguished from a choice.
+   * An explicit non-default value therefore wins, and only when it is absent or equal to the
+   * default does the legacy tier decide.
+   */
+  if (typeof enabled === 'boolean' && enabled !== DEFAULT_PROTECTED_PATHS_ENABLED) return enabled
   const legacy = value?.pathGuardPolicy
   if (typeof legacy === 'string' && GUARD_POLICIES.includes(legacy)) return legacy !== 'allow'
-  return DEFAULT_PROTECTED_PATHS_ENABLED
+  return typeof enabled === 'boolean' ? enabled : DEFAULT_PROTECTED_PATHS_ENABLED
 }
 
 /**
