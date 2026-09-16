@@ -132,6 +132,25 @@ window.__ModuleLoader__.load({
        * narrow one requires a command position (no false refusals, may miss an
        * obfuscated form). The operator picks which error they prefer.
        */
+      /** Where git may run. The default is the session's own workspace. */
+      const TARGET_COPY = [
+        {
+          id: 'workspace',
+          label: '仅工作区',
+          hint: '只能在本次会话的工作区内执行。默认值，也是最保守的一档。',
+        },
+        {
+          id: 'allowlist',
+          label: '指定路径',
+          hint: '只能在下面列出的根目录内执行（含其子目录）。',
+        },
+        {
+          id: 'unrestricted',
+          label: '无限制',
+          hint: '可以在机器上任何目录执行 —— 包括你不希望它接触的仓库。请明确知道自己在放开什么。',
+        },
+      ]
+
       /** The script check's tiers, in the order the control shows them. */
       const SCRIPT_COPY = [
         {
@@ -313,6 +332,8 @@ window.__ModuleLoader__.load({
             heartbeat: CATALOG.defaults.heartbeat === true,
             logPath: CATALOG.defaults.logPath,
             scriptCheckPolicy: CATALOG.defaults.scriptCheckPolicy,
+            targetScope: CATALOG.defaults.targetScope,
+            targetPaths: [...(CATALOG.defaults.targetPaths ?? [])],
             scanScripts: CATALOG.defaults.scanScripts !== false,
             sshCommand: CATALOG.defaults.sshCommand,
             pathGuardPolicy: CATALOG.defaults.pathGuardPolicy,
@@ -337,6 +358,12 @@ window.__ModuleLoader__.load({
           logEnabled: section.logEnabled !== false,
           heartbeat: section.heartbeat === true,
           logPath: typeof section.logPath === 'string' ? section.logPath : CATALOG.defaults.logPath,
+          targetScope: TARGET_COPY.some((entry) => entry.id === section.targetScope)
+            ? section.targetScope
+            : CATALOG.defaults.targetScope,
+          targetPaths: Array.isArray(section.targetPaths)
+            ? section.targetPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+            : [...(CATALOG.defaults.targetPaths ?? [])],
           scriptCheckPolicy: SCRIPT_COPY.some((entry) => entry.id === section.scriptCheckPolicy)
             ? section.scriptCheckPolicy
             : CATALOG.defaults.scriptCheckPolicy,
@@ -831,6 +858,30 @@ window.__ModuleLoader__.load({
                 }),
                 '逗号分隔',
               ),
+              row(
+                '目标范围',
+                segmented('targetScope', TARGET_COPY, value.targetScope ?? CATALOG.defaults.targetScope),
+                'git 可以在哪里执行。工作区之外的操作在「仅工作区」下会被拒绝。',
+              ),
+              (value.targetScope ?? CATALOG.defaults.targetScope) === 'allowlist'
+                ? row(
+                  '允许的根目录',
+                  React.createElement('textarea', {
+                    className: 'git-tool-input',
+                    rows: 4,
+                    disabled: !canWrite,
+                    'data-writes': 'true',
+                    placeholder: '/home/me/work\n/mnt/d/projects',
+                    value: proxyDraft.targetPaths ?? (value.targetPaths ?? []).join('\n'),
+                    onChange: (event) => setProxyDraft((previous) => ({ ...previous, targetPaths: event.target.value })),
+                    onBlur: (event) => writePolicy(
+                      'targetPaths',
+                      event.target.value.split('\n').map((line) => line.trim()).filter((line) => line.length > 0),
+                    ),
+                  }),
+                  '一行一个根目录；目标目录必须落在其中某一个之内（含子目录）。',
+                )
+                : null,
               row(
                 '写入脚本时检查内容',
                 segmented('scriptCheckPolicy', SCRIPT_COPY, value.scriptCheckPolicy ?? CATALOG.defaults.scriptCheckPolicy),
