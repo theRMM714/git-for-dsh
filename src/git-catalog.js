@@ -845,8 +845,17 @@ export function buildEnv(options = {}) {
    * normalised even when the harness runs elsewhere (and the rule is testable anywhere).
    */
   const looksLikeWindowsPath = /^[a-zA-Z]:[\\/]/.test(sshCommand)
-  const sshPath = looksLikeWindowsPath ? sshCommand.replace(/\\/g, '/') : sshCommand
-  const sshProgram = `"${sshPath}"`
+  const sshProgram = looksLikeWindowsPath
+    /*
+     * A Windows path becomes forward slashes and is double-quoted, which is kept here rather
+     * than routed through shellQuote: inside double quotes a backslash is literal, Windows
+     * accepts forward slashes, and both defences together survive whichever shell parses the
+     * value.
+     */
+    ? `"${sshCommand.replace(/\\/g, '/')}"`
+    // Everywhere else one quoting rule applies, shared with the argv hardening so the two cannot
+    // drift: single quotes make the shell treat the whole path as literal.
+    : shellQuote(sshCommand)
   env.GIT_SSH_COMMAND = `${sshProgram} -o BatchMode=yes -o StrictHostKeyChecking=accept-new`
 
   /*
