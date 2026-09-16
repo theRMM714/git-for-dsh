@@ -804,6 +804,30 @@ describe('host plugin: the tool guard', () => {
     )
   })
 
+  it('sees a protected path handed to git_exec itself', async () => {
+    // The gap: this tool's operands are argv/paths, not file_path/path, so a read-tier
+    // `diff --no-index` printed a protected file with no approval and no path rule applied.
+    // A path that collides with no built-in name, so the operator's own row is what fires.
+    const privatePath = '/home/probe/private-notes.txt'
+    const unticked = mount({ settings: settingsWith({ pathRules: [{ path: privatePath, read: false, write: false, ask: false }] }) })
+    const read = await decide(unticked.recorded, call('git_exec', { argv: ['diff', '--no-index', privatePath, '/dev/null'] }))
+    assert.equal(read.kind, 'deny')
+    assert.match(read.reason, /private-notes\.txt/, 'the operator row is what refused it')
+
+    // The same call through paths.
+    const viaPaths = await decide(unticked.recorded, call('git_exec', { argv: ['diff', '--no-index'], paths: [privatePath] }))
+    assert.equal(viaPaths.kind, 'deny')
+
+    // Ticking the read box permits it, because a diff is judged as a read.
+    const readTicked = mount({ settings: settingsWith({ pathRules: [{ path: privatePath, read: true, write: false, ask: false }] }) })
+    const allowed = await decide(readTicked.recorded, call('git_exec', { argv: ['diff', '--no-index', privatePath, '/dev/null'] }))
+    assert.equal(allowed.kind, 'delegated')
+
+    // A write-shaped operation still needs the write box.
+    const writeAttempt = await decide(readTicked.recorded, call('git_exec', { argv: ['add', privatePath] }))
+    assert.equal(writeAttempt.kind, 'deny')
+  })
+
   it('never breaks a call it cannot judge', async () => {
     // The guard absorbs its own failures: throwing here would take down every tool
     // call in the session, which is worse than the one call it failed to inspect.
