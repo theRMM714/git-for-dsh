@@ -10,6 +10,21 @@
 - **Client 半**（`src/client.js`）在「设置 → Git 工具」里渲染勾选页，用户在这里决定放行哪些子命令。
 
 ## 为什么需要它
+### 在 Windows 上还有一条更硬的理由
+
+dsh 自带的交互式 bash 工具在 Windows 上基本起不来，报错通常是 `PTY shell exited during startup` 或 `terminal inspection is unsupported on platform win32`。原因有三层，都在 dsh 代码里可以查到：
+
+- **进程检查器只实现到 Linux/macOS** —— 报错原文就在 `dsh-subprocess-local` 里；
+- **交互式终端依赖 PTY** —— 报错原文在 `dsh-terminal-bash` 里；
+- **Windows 的 ACL 沙箱以受限令牌隔离进程** —— `dsh-sandbox-windows-acl` 通过 FFI 直接调用 `createRestrictedToken`（带 restricting SID），而 MSYS 运行时需要创建共享内存映射，这类操作会被受限令牌拒绝。
+
+**本插件的 `git_exec` 不走那条路**，因此不受这些限制：
+
+- 它把命令交给 dsh 的 `ctx.shell` 执行**一次性命令**（`ctx.shell` 每个 host 只有一个实现；在 Windows 上由 win32 层换成 **pwsh** 那套，在 Linux/macOS 上是 bash 那套），**不使用交互式 PTY，也不依赖终端检查器**；
+- 它以 `danger-full-access` 在沙箱**之外**运行 git，因此也不进入受限令牌沙箱。
+
+换句话说，在 Windows 上它并不"绕道 Git Bash" —— 它走的是一条不撞上这些坑的路径，这一点可以通过本工具在 Windows 上正常推送/读取仓库直接验证。
+
 
 为了更精准、安全地控制 AI 使用 git 指令的边界。
 
