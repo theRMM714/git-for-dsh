@@ -1324,10 +1324,16 @@ export function invokesGit(command, spend = unboundedSteps) {
 /**
  * Whether a shell command TEXT names a protected path.
  *
- * Both the whole entry and its basename count: cat ~/.git-credentials and
- * cat .git-credentials are the same intent, and the basename is what makes the
- * relative form visible. A substring test is the point — an exact compare would miss
- * the wildcard form, which is exactly what catching text is for.
+ * The whole entry always counts, and so does the basename — but ONLY for a dotfile, whose
+ * name is effectively unambiguous: `cat .gitconfig` is the relative form of
+ * `cat ~/.gitconfig`, and refusing it is the point.
+ *
+ * A dotfile test rather than "any basename", because the basename comparison is a substring
+ * comparison and plenty of basenames are ordinary words. `~/.config/git/config` has the
+ * basename `config`, and matching that against command text refused every command containing
+ * the word `config` — `git config …` and even `cat ~/.gitconfig` — against a built-in row
+ * with nothing ticked. A guard that refuses ordinary work is worse than one that misses a
+ * path spelled unusually, so everything else must appear as the full path.
  *
  * @param command - the shell command text.
  * @param protectedPaths - configured paths, possibly tilde-prefixed.
@@ -1336,9 +1342,9 @@ export function invokesGit(command, spend = unboundedSteps) {
 export function mentionsProtectedPath(command, protectedPaths) {
   if (typeof command !== 'string' || command.length === 0) return false
   for (const entry of protectedPaths) {
-    const base = entry.split('/').filter((part) => part.length > 0).slice(-1)[0]
-    if (base !== undefined && base.length > 2 && command.includes(base)) return true
     if (command.includes(entry)) return true
+    const base = entry.split('/').filter((part) => part.length > 0).slice(-1)[0]
+    if (base !== undefined && base.startsWith('.') && base.length > 2 && command.includes(base)) return true
   }
   return false
 }
