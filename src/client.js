@@ -138,23 +138,6 @@ window.__ModuleLoader__.load({
       /** Whether this path is one of the built-in rows. */
       const isBuiltinRow = (path) => (CATALOG.defaults.protectionRows ?? []).some((row) => row.path === path)
 
-      /**
-       * Add the pending path as a row with every box empty.
-       *
-       * One function for the button and for Enter, so the two cannot drift apart. A path that
-       * is already listed is not added twice; the input is cleared either way, because the
-       * operator's intent was to register it.
-       */
-      const addPendingPath = () => {
-        const path = (proxyDraft.newPath ?? '').trim()
-        if (path.length === 0) return
-        const rows = (value.pathRules ?? []).map(storableRow)
-        if (!rows.some((row) => row.path === path)) {
-          writePolicy('pathRules', [...rows, { path, read: false, write: false, ask: false }])
-        }
-        setProxyDraft((previous) => ({ ...previous, newPath: '' }))
-      }
-
       /** A row as the settings document stores it: the boxes, and nothing derived. */
       const storableRow = (row) => ({ path: row.path, read: row.read === true, write: row.write === true, ask: row.ask === true })
 
@@ -620,6 +603,23 @@ window.__ModuleLoader__.load({
            * @param field - the namespace field to write.
            * @param next - the value the user chose.
            */
+          /**
+           * Add the pending path as a row with every box empty.
+           *
+           * One function for the button and for Enter, so the two cannot drift apart. A path that
+           * is already listed is not added twice; the input is cleared either way, because the
+           * operator's intent was to register it.
+           */
+          const addPendingPath = () => {
+            const path = (proxyDraft.newPath ?? '').trim()
+            if (path.length === 0) return
+            const rows = (value.pathRules ?? []).map(storableRow)
+            if (!rows.some((row) => row.path === path)) {
+              writePolicy('pathRules', [...rows, { path, read: false, write: false, ask: false }])
+            }
+            setProxyDraft((previous) => ({ ...previous, newPath: '' }))
+          }
+
           const writePolicy = (field, next) => {
             setDraft({ ...value, [field]: next })
             setWriteError(null)
