@@ -634,7 +634,7 @@ describe('host plugin: the blacklist covers the target directory', () => {
     return definition.execute({ ...CALL, argv: ['status'], workdir: '/blacklisted/repo' }, execution()).then(
       () => assert.fail('a blacklisted target must be refused'),
       (error) => {
-        assert.match(error.message, /路径黑名单/)
+        assert.match(error.message, /路径权限/)
         assert.match(error.message, /黑名单优先于「目标范围」/)
       },
     )
@@ -741,7 +741,7 @@ describe('the ruling logic is callable on its own', () => {
   it('refuses a write to the same row', () => {
     const verdict = inspectToolCall(pending('write', { file_path: '/home/me/private/notes.txt' }), policy, cache())
     assert.equal(verdict.kind, 'deny')
-    assert.match(verdict.reason, /路径黑名单/)
+    assert.match(verdict.reason, /路径权限/)
   })
 
   it('refuses a git_exec argument that names the row', () => {
@@ -789,7 +789,7 @@ describe('the ruling logic is callable on its own', () => {
     const own = { ...policy, pathRules: [{ path: dir, read: false, write: false, ask: false }] }
     const verdict = inspectToolCall(pending('bash', { command: 'ls', workdir: join(dir, 'inner') }), own, cache())
     assert.equal(verdict.kind, 'deny')
-    assert.match(verdict.reason, /路径黑名单/)
+    assert.match(verdict.reason, /路径权限/)
   })
 
   it('leaves an unrelated call alone', () => {
@@ -941,7 +941,7 @@ describe('host plugin: the tool guard', () => {
     // Credentials start with nothing ticked: denied silently, and the message names the row.
     const denied = await decide(opened.recorded, call('bash', { command: 'cat ~/.git-credentials', description: 'x' }))
     assert.equal(denied.kind, 'deny')
-    assert.match(denied.reason, /路径黑名单/)
+    assert.match(denied.reason, /路径权限/)
 
     // The bash tier decides how a mention is judged; write-only counts a plain read as a
     // write, which matters once only the read box is ticked.
@@ -1019,7 +1019,7 @@ describe('host plugin: the tool guard', () => {
     const unticked = mount({ settings: settingsWith({ pathRules: [{ path: dir, read: false, write: false, ask: false }] }) })
     const inside = await decide(unticked.recorded, call('bash', { command: 'ls', workdir: deep }))
     assert.equal(inside.kind, 'deny')
-    assert.match(inside.reason, /路径黑名单/)
+    assert.match(inside.reason, /路径权限/)
 
     // Reading is permitted once the read box is ticked; the same command still runs.
     const readTicked = mount({ settings: settingsWith({ pathRules: [{ path: dir, read: true, write: false, ask: false }] }) })
