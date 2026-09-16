@@ -303,6 +303,15 @@ describe('client bundle: loading', () => {
     assert.doesNotThrow(() => add[0].props.onClick())
   })
 
+  it('offers the configuration health and its reset', () => {
+    const page = renderPage(activate().calls)
+    const text = JSON.stringify(page)
+    assert.ok(text.includes('配置体检'), 'the health row renders')
+    assert.ok(text.includes('一键初始化'), 'the reset button renders')
+    // The button destroys customisations, so the row has to say so.
+    assert.ok(text.includes('全部默认值'), 'and the row states what the button does')
+  })
+
   it('offers reading and clearing the log on its own tab', () => {
     const page = renderPage(activate().calls)
     const buttons = collect(page, (element) => element.type === 'button')
