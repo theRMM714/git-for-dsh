@@ -828,6 +828,23 @@ describe('host plugin: the tool guard', () => {
     assert.equal(writeAttempt.kind, 'deny')
   })
 
+  it('judges a silenced read as a read, not a write', async () => {
+    // A row opened for reading only. Every command below reads the file and throws output
+    // away, so none of them names a file to write.
+    const notes = '/home/probe/private-notes.txt'
+    const { recorded } = mount({ settings: settingsWith({ pathRules: [{ path: notes, read: true, write: false, ask: false }] }) })
+    const command = (text) => decide(recorded, call('bash', { command: text, description: 'x' }))
+
+    assert.equal((await command('cat ' + notes)).kind, 'delegated')
+    assert.equal((await command('cat ' + notes + ' 2>/dev/null')).kind, 'delegated')
+    assert.equal((await command('cat ' + notes + ' > /dev/null')).kind, 'delegated')
+    assert.equal((await command('grep -n x ' + notes + ' 2>&1')).kind, 'delegated')
+
+    // A redirection that names a file is still a write, so the write box is required.
+    assert.equal((await command('cat ' + notes + ' > /tmp/out.txt')).kind, 'deny')
+    assert.equal((await command('cat ' + notes + ' >> /tmp/out.txt')).kind, 'deny')
+    assert.equal((await command('cat ' + notes + ' | tee /tmp/out.txt')).kind, 'deny')
+  })
   it('never breaks a call it cannot judge', async () => {
     // The guard absorbs its own failures: throwing here would take down every tool
     // call in the session, which is worse than the one call it failed to inspect.
