@@ -1114,8 +1114,11 @@ window.__ModuleLoader__.load({
                     disabled: !canWrite,
                     'data-writes': 'true',
                     placeholder: '/usr/bin/ssh',
-                    value: proxyDraft.sshCommand ?? (value.sshCommand ?? CATALOG.defaults.sshCommand),
-                    onChange: (event) => setProxyDraft((previous) => ({ ...previous, sshCommand: event.target.value })),
+                    // Uncontrolled, keyed by the setting itself: typing costs no re-render, and a
+                    // change made elsewhere (a reset, another session) remounts the box with the
+                    // new value. The write reads the box on blur, so nothing else is needed.
+                    key: 'sshCommand:' + String(value.sshCommand ?? CATALOG.defaults.sshCommand),
+                    defaultValue: value.sshCommand ?? CATALOG.defaults.sshCommand,
                     onBlur: (event) => writePolicy('sshCommand', event.target.value),
                   }),
                   React.createElement(
@@ -1254,8 +1257,8 @@ window.__ModuleLoader__.load({
                   disabled: !canWrite,
                   'data-writes': 'true',
                   placeholder: '例如 my-proxy --port 7890',
-                  value: proxyDraft.proxyCommand ?? (value.proxyCommand ?? ''),
-                  onChange: (event) => setProxyDraft((previous) => ({ ...previous, proxyCommand: event.target.value })),
+                  key: 'proxyCommand:' + String(value.proxyCommand ?? ''),
+                  defaultValue: value.proxyCommand ?? '',
                   onBlur: (event) => writePolicy('proxyCommand', event.target.value),
                 }),
                 '首次远程操作时执行一次',
@@ -1296,8 +1299,8 @@ window.__ModuleLoader__.load({
                   disabled: !canWrite,
                   'data-writes': 'true',
                   placeholder: '留空使用默认路径',
-                  value: proxyDraft.logPath ?? (value.logPath ?? ''),
-                  onChange: (event) => setProxyDraft((previous) => ({ ...previous, logPath: event.target.value })),
+                  key: 'logPath:' + String(value.logPath ?? ''),
+                  defaultValue: value.logPath ?? '',
                   onBlur: (event) => writePolicy('logPath', event.target.value),
                 }),
                 (value.logPath ?? '').length > 0 ? '当前：' + value.logPath : '当前：默认（$DSH_HOME/git-for-dsh.log）',
