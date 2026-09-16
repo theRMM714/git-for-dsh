@@ -978,7 +978,34 @@ export function isShellScriptTarget(filePath, content) {
  * difference is stated plainly because it is the difference between a rule and a
  * boundary.
  */
-export const DEFAULT_PROTECTED_PATHS = Object.freeze(['~/.git-credentials', '~/.gitconfig'])
+/** The operator's own list starts EMPTY: the built-in groups below cover the known files. */
+export const DEFAULT_PROTECTED_PATHS = Object.freeze([])
+
+/** Whether the operator's own list is enforced. On by default; the list is kept when off. */
+export const DEFAULT_PROTECTED_PATHS_ENABLED = true
+
+/**
+ * Credential files: the machine's stored secrets.
+ *
+ * Built in rather than user-entered, because this is the contents that must never reach the
+ * model's context, and the agent never needs it — authentication is done by the git the
+ * plugin runs itself. A leak here is a real leak, so the default tier is deny.
+ */
+export const CREDENTIAL_PATHS = Object.freeze(['~/.git-credentials', '~/.netrc', '~/.authinfo'])
+
+/** The tier for the built-in credential files. */
+export const DEFAULT_CREDENTIAL_POLICY = 'deny'
+
+/**
+ * Identity and configuration files.
+ *
+ * Lower stakes than credentials — a name, an email, a proxy — and the operator may
+ * legitimately want the model to read or adjust them. Hence the default tier is ask.
+ */
+export const IDENTITY_PATHS = Object.freeze(['~/.gitconfig', '~/.config/git/config'])
+
+/** The tier for the built-in identity and configuration files. */
+export const DEFAULT_IDENTITY_POLICY = 'ask'
 
 /**
  * Whether a shell command invokes git.
