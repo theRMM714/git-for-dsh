@@ -1,19 +1,11 @@
 /**
  * The diagnostic log: durable, and gated per purpose.
  *
- * Why synchronous, after a detour. The first version streamed, and a line generated just
- * before the process stopped could sit in the buffer and never reach the disk — which made
- * "guard.enter without guard.exit" ambiguous between "the guard hung" and "the process
- * stopped". That ambiguity was the whole cost of streaming, and a synchronous append
- * removes it: a line is on disk before the next step runs, or it does not exist.
- *
- * The detour is worth recording, because it was wrong. While the freezes were being
- * investigated, a blocking write was accused of causing them, and this file was changed to
- * stream. The real cause was an infinite loop elsewhere (PITFALLS 31) — a pure-logic bug
- * that hangs the event loop no matter how the log is written. Durability therefore came
- * back. What stays true from that episode: the log is the only thing in this plugin that
- * touches the filesystem, and its default destination is beside the harness state rather
- * than on a Windows-mounted drive.
+ * Writes are synchronous, so a line is on disk before the next step runs. That is what makes
+ * a missing line mean "this never happened" rather than "this sat in a buffer" — the pair
+ * `guard.enter` / `guard.exit` is read that way. The cost is one small append per entry, and
+ * the log is the only thing in this plugin that touches the filesystem, which is why its
+ * default destination is beside the harness state rather than on a Windows-mounted drive.
  *
  * Two independent gates, because they answer different questions:
  *

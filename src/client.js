@@ -71,10 +71,9 @@ window.__ModuleLoader__.load({
       /**
        * Turn the port-check response into either a report or a readable failure.
        *
-       * An unmatched route answers with an EMPTY body, and the first version read it
-       * with `response.json()` — so the page showed the parser's message
-       * ("Unexpected end of JSON input") instead of the actionable one ("the running
-       * Host half predates this route; restart dsh web").
+       * An unmatched route answers with an EMPTY body, so the body is classified before
+       * it is parsed: the page reports the actionable cause (the running Host half predates
+       * this route; restart dsh web) rather than the parser's message.
        *
        * @param status - the HTTP status.
        * @param text - the raw body.
