@@ -100,7 +100,7 @@
 
 ### 决策：非交互环境全部通过环境变量固定，不用 `-c`
 
-`buildEnv()` 固定 `GIT_TERMINAL_PROMPT=0`、`GIT_ASKPASS=''`、分页器、编辑器、`core.hooksPath=/dev/null`，并把需要的配置通过 `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` 注入子进程。
+`buildEnv()` 固定 `GIT_TERMINAL_PROMPT=0`、`GIT_ASKPASS=''`、分页器、编辑器、`core.hooksPath=` 平台空设备（Windows 上为 `NUL`，其余为 `/dev/null`），并把需要的配置通过 `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` 注入子进程。
 
 - 换来的是：**同一个注入通道不能由调用方使用** —— `-c` 与 `--config-env` 可以留在拒绝名单里，因为插件自己不需要它们。
 - 代价是：注入的配置必须在代码里逐个列出，新增一项要同时考虑它与拒绝名单的关系。
@@ -113,7 +113,7 @@
 
 ### 决策：默认隐藏用户级与系统配置，并钉空 `credential.helper`
 
-默认把 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 指向 `/dev/null`，并设 `GIT_CONFIG_NOSYSTEM=1`，`credential.helper` 钉成空字符串。
+默认把 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 指向平台空设备（Windows 上为 `NUL`），并设 `GIT_CONFIG_NOSYSTEM=1`，`credential.helper` 钉成空字符串。
 
 - 换来的是：一次性压住全局配置里所有「会执行程序」和「会重定向主机」的键（`alias.*`、`url.insteadOf`、helper 程序）。
 - 代价是：**远程写操作一律失败**（`could not read Username`），这是设计而非故障；需要认证能力时必须显式开启下一项。
