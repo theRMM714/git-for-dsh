@@ -892,6 +892,31 @@ describe('host plugin: the tool guard', () => {
     assert.equal((await command('cat ' + notes + ' >> /tmp/out.txt')).kind, 'deny')
     assert.equal((await command('cat ' + notes + ' | tee /tmp/out.txt')).kind, 'deny')
   })
+  it('judges the bash working directory against the blacklist', async () => {
+    // The directory row does not stop a command that simply runs inside it — the command text
+    // names nothing. The row's own boxes decide, as they do everywhere else.
+    const dir = join(mkdtempSync(join(tmpdir(), 'git-tool-workdir-')), 'notes-dir')
+    const deep = join(dir, 'inner')
+    mkdirSync(deep, { recursive: true })
+    const unticked = mount({ settings: settingsWith({ pathRules: [{ path: dir, read: false, write: false, ask: false }] }) })
+    const inside = await decide(unticked.recorded, call('bash', { command: 'ls', workdir: deep }))
+    assert.equal(inside.kind, 'deny')
+    assert.match(inside.reason, /路径黑名单/)
+
+    // Reading is permitted once the read box is ticked; the same command still runs.
+    const readTicked = mount({ settings: settingsWith({ pathRules: [{ path: dir, read: true, write: false, ask: false }] }) })
+    const allowed = await decide(readTicked.recorded, call('bash', { command: 'ls', workdir: dir + '/inner' }))
+    assert.equal(allowed.kind, 'delegated')
+
+    // A command that writes there still needs the write box.
+    const written = await decide(readTicked.recorded, call('bash', { command: 'rm -rf notes', workdir: deep }))
+    assert.equal(written.kind, 'deny')
+
+    // A directory outside the row is untouched.
+    const elsewhere = await decide(readTicked.recorded, call('bash', { command: 'ls', workdir: join(dir, '..', 'elsewhere') }))
+    assert.equal(elsewhere.kind, 'delegated')
+  })
+
   it('never breaks a call it cannot judge', async () => {
     // The guard absorbs its own failures: throwing here would take down every tool
     // call in the session, which is worse than the one call it failed to inspect.
