@@ -49,6 +49,10 @@ import {
   DEFAULT_CREDENTIAL_POLICY,
   IDENTITY_PATHS,
   DEFAULT_IDENTITY_POLICY,
+  DEFAULT_PROTECTION_ROWS,
+  migrateProtectionRows,
+  BASH_PATH_MODES,
+  DEFAULT_BASH_PATH_MODE,
   DEFAULT_TARGET_SCOPE,
   DEFAULT_SSH_COMMAND,
   DEFAULT_PROTECTED_PATHS,
@@ -161,6 +165,26 @@ export const Config = z.object({
    * Two states, not three: the list means "the AI must not touch this", so there is nothing
    * useful to ask about. Turning it off keeps the list for later — that was the point.
    */
+  /**
+   * The blacklist: one row per path, with the read, write and ask boxes.
+   *
+   * No schema default: `migrateProtectionRows` reads this key to tell an already-migrated
+   * document from one that still carries the old tiers, and a default would hide the
+   * difference (PITFALLS 35).
+   */
+  pathRules: z
+    .array(z.object({
+      path: z.string(),
+      read: z.boolean(),
+      write: z.boolean(),
+      ask: z.boolean(),
+    }))
+    .description('One row per protected path: read and write allow without asking, ask prompts for every access, nothing ticked means denied.'),
+  /** How a path mentioned in a bash command is judged; see BASH_PATH_MODES. */
+  bashPathMode: z
+    .union(BASH_PATH_MODES.map((mode) => z.const(mode)))
+    .default(DEFAULT_BASH_PATH_MODE)
+    .description('How a path named in a bash command is judged: heuristic (obvious reads as reads, everything else as a write) or write-only (any mention counts as a write).'),
   protectedPathsEnabled: z
     .boolean()
     .description('Enforce the protected-paths list. Off means the list is kept but not applied.'),
@@ -602,6 +626,8 @@ function normalizePolicy(value) {
       ? value.nativeGitPolicy
       : DEFAULT_NATIVE_GIT_POLICY,
     protectedPathsEnabled: normalizeProtectedEnabled(value),
+    pathRules: migrateProtectionRows(value),
+    bashPathMode: BASH_PATH_MODES.includes(value?.bashPathMode) ? value.bashPathMode : DEFAULT_BASH_PATH_MODE,
     credentialPolicy: normalizeGroupPolicy(value?.credentialPolicy, DEFAULT_CREDENTIAL_POLICY),
     identityPolicy: normalizeGroupPolicy(value?.identityPolicy, DEFAULT_IDENTITY_POLICY),
     protectedPaths: Array.isArray(value?.protectedPaths)
