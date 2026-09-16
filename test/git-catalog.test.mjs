@@ -543,6 +543,18 @@ describe('a credential URL is refused in any position', () => {
     })
   })
 
+  describe('clone cannot inject configuration into the new repository', () => {
+    it('refuses the config options on clone itself', () => {
+      refused(['clone', '-c', 'filter.p.smudge=/tmp/payload', 'file:///r', 'dest'], /clone -c/)
+      refused(['clone', '--config', 'core.attributesFile=/tmp/attrs', 'r', 'd'], /clone -c/)
+      refused(['clone', '--config-env', 'core.pager=EVIL', 'r', 'd'], /refused/)
+    })
+
+    it('still runs a plain clone', () => {
+      assert.equal(validateArgv(['clone', 'https://example.com/team/repo.git', 'dest']).ok, true)
+    })
+  })
+
   describe('validateArgv: refusals', () => {
   it('refuses an empty or malformed request', () => {
     refused([], /non-empty array/)
