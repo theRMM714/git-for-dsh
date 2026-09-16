@@ -770,6 +770,28 @@ describe('the ruling logic is callable on its own', () => {
     assert.equal(verdict.kind, 'ask')
   })
 
+  it('checks the content a script write would carry', () => {
+    // The script check reads the content from the call's own arguments, so it needs no file.
+    const verdict = inspectToolCall(
+      pending('write', { file_path: '/tmp/probe.sh', content: '#!/bin/sh\ngit status\n' }),
+      policy,
+      cache(),
+    )
+    assert.equal(verdict.kind, 'deny')
+    assert.match(verdict.reason, /脚本/)
+  })
+
+  it('judges the bash working directory', () => {
+    // The directory has to exist: the containment judgement resolves both sides, and a path that
+    // resolves to nothing cannot be judged at all.
+    const dir = join(mkdtempSync(join(tmpdir(), 'git-tool-direct-')), 'private')
+    mkdirSync(join(dir, 'inner'), { recursive: true })
+    const own = { ...policy, pathRules: [{ path: dir, read: false, write: false, ask: false }] }
+    const verdict = inspectToolCall(pending('bash', { command: 'ls', workdir: join(dir, 'inner') }), own, cache())
+    assert.equal(verdict.kind, 'deny')
+    assert.match(verdict.reason, /路径黑名单/)
+  })
+
   it('leaves an unrelated call alone', () => {
     assert.equal(inspectToolCall(pending('read', { file_path: '/tmp/anything.txt' }), policy, cache()), undefined)
   })
