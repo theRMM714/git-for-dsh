@@ -1079,8 +1079,7 @@ function repositoryStamp(workdir) {
  *
  * @param message - what went wrong, and what it means for this call.
  */
-const announced = new Set()
-function announce(message) {
+function announce(announced, message) {
   if (announced.has(message)) return
   announced.add(message)
   try {
@@ -1762,8 +1761,9 @@ function setup(ctx, entry = {}) {
    * because module state is shared by every activation — the mistake entry 20 records.
    */
   const guardCache = { key: undefined, files: [], names: new Set() }
-  // Per activation, like guardCache, and passed to the audit that uses it.
+  // Per activation, like guardCache, and passed to whatever uses them.
   const auditCache = new Map()
+  const announced = new Set()
   ctx.on('tools/pre-execute', (execution, next) => {
     /*
      * Off means off: no interception, no inspection, and no log line. Writing a line here
@@ -1972,7 +1972,7 @@ function setup(ctx, entry = {}) {
       }
 
       // Gate 2 — the repository's own configuration must be safe to run under.
-      const auditRefusal = await auditRepositoryConfig(ctx, exec, name, policy.current.dangerousKeyPolicy, targetWorkdir, workspaceRoot, auditCache)
+      const auditRefusal = await auditRepositoryConfig(ctx, exec, name, policy.current.dangerousKeyPolicy, targetWorkdir, workspaceRoot, auditCache, announced)
       if (auditRefusal !== null) throw new Error(auditRefusal)
 
       // Gate 3 — per-call approval for state-changing work, when the user asked for it.
@@ -1990,7 +1990,7 @@ function setup(ctx, entry = {}) {
           signal: exec.signal,
         })
         if (outcome !== 'allowed-once') {
-          throw new Error(`git ${name} was not approved: ${approvalRefusal(outcome, ctx, exec)}`)
+          throw new Error(`git ${name} was not approved: ${approvalRefusal(outcome, ctx, exec, announced)}`)
         }
       }
 
@@ -2090,7 +2090,7 @@ function setup(ctx, entry = {}) {
  * @param workspaceRoot - the session workspace, for the sandbox policy.
  * @returns a refusal message, or null when the call may proceed.
  */
-async function auditRepositoryConfig(ctx, exec, subcommand, policy, workdir, workspaceRoot, cache) {
+async function auditRepositoryConfig(ctx, exec, subcommand, policy, workdir, workspaceRoot, cache, announced) {
   /*
    * Loud, and OUTSIDE the try below.
    *
@@ -2142,7 +2142,7 @@ async function auditRepositoryConfig(ctx, exec, subcommand, policy, workdir, wor
      * weeks. The enforced-config pins still hold the critical keys, so the call proceeds,
      * but the operator is told.
      */
-    announce(`仓库配置审计无法运行，本次未做审计：${error instanceof Error ? error.message : String(error)}`)
+    announce(announced, `仓库配置审计无法运行，本次未做审计：${error instanceof Error ? error.message : String(error)}`)
     return null
   }
   if (result.exitCode !== 0) return null
@@ -2170,7 +2170,7 @@ async function auditRepositoryConfig(ctx, exec, subcommand, policy, workdir, wor
  * @param exec - the call being gated.
  * @returns one sentence naming the cause and the remedy.
  */
-function approvalRefusal(outcome, ctx, exec) {
+function approvalRefusal(outcome, ctx, exec, announced) {
   const policy = sessionPolicy(ctx, exec)
   if (outcome === 'rejected') {
     if (policy === 'never') {
@@ -2206,7 +2206,7 @@ function sessionPolicy(ctx, exec) {
     return approval.overrideOf(session)
   } catch (error) {
     // Silence here changes what the user is asked, so it is not allowed to be silent.
-    announce(`审批覆盖查询失败，本次按"未覆盖"处理：${error instanceof Error ? error.message : String(error)}`)
+    announce(announced, `审批覆盖查询失败，本次按"未覆盖"处理：${error instanceof Error ? error.message : String(error)}`)
     return undefined
   }
 }
