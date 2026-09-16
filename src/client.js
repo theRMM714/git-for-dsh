@@ -1483,6 +1483,13 @@ window.__ModuleLoader__.load({
         '.git-tool-rowBody{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px}',
         '.git-tool-rowNote{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}',
         '.git-tool-inline{display:flex;align-items:center;gap:8px}',
+        /*
+         * The health bar: its status text can be long (a list of retired keys), and the shared
+         * note rule refuses to shrink — so without this the button is pushed out of sight. Here
+         * the text shrinks and wraps, and the button stays next to it.
+         */
+        '.git-tool-configBar{flex-wrap:wrap}',
+        '.git-tool-configBar .git-tool-ruleNote{flex:0 1 auto;min-width:0;word-break:break-word}',
         '.git-tool-seg{display:inline-flex;padding:2px;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l1);border-radius:9px}',
         '.git-tool-segItem{appearance:none;margin:0;padding:3px 12px;color:var(--dsw-alias-label-secondary);background:transparent;border:none;border-radius:7px;font:inherit;font-size:12px;line-height:18px;cursor:pointer}',
         '.git-tool-segItem:hover:not(:disabled){color:var(--dsw-alias-label-primary)}',
