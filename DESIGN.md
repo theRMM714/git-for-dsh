@@ -153,7 +153,26 @@
 
 两档「拒绝」的差别只在**判定宽度**：宽匹配对内容里出现 git 的任何调用都拒（含「只是提到」），`restrict` 只在命令位置判（不误伤，但可能漏掉生僻写法）。默认宽匹配，因为漏掉一次真实调用比误拒一次更糟；同时也把 `restrict` 明确提供给「命令里经常出现 git 字样」的使用者，因为那是真实且常见的需求（内容级检查的必然代价见 PITFALLS 34）。
 
-### 决策：目标范围默认「仅工作区」
+### 决策：不做「由本插件自己调 Git Bash」这个选项
+
+社区反馈"DSH 自带 bash 工具在 Windows 上不可用"，据此有人建议让插件自己拉起 Git Bash。核查后**不采纳**，理由写在下面，并附上核实到的边界 —— 将来若再有人提同一件事，从这里开始。
+
+**核实到的事实**（对着 dsh 源码逐条查）：
+
+- 两个相关包**确实存在**：`dsh-subprocess-local`、`dsh-sandbox-windows-acl`（另有 `dsh-bash-sandbox`、`dsh-pwsh-sandbox` 等并列实现）。
+- 两句报错原文**确实存在**：`terminal inspection is unsupported on platform win32` 在 `dsh-subprocess-local` 的 runner 里，`PTY shell exited during startup` 在 `dsh-terminal-bash` 里。也就是说，出问题的是**交互式 PTY 终端**与**进程检查器**。
+- `MSYSTEM` / `CHERE_INVOKING` 在整个代码树里**搜不到** —— 那是"谁自己手动起 Git Bash 就得自己设"的注意事项，不是 dsh 的缺陷。
+- "受限令牌与 MSYS 共享内存冲突"这一条**未核实**（需要读 `dsh-sandbox-windows-acl` 的实现）。
+
+**为什么不采纳**：
+
+1. **我们走的不是那两个坏掉的路径。** 本插件用 `ctx.shell.run` 执行**一次性命令**，不使用交互式 PTY，也不依赖终端检查器。这一点有直接证据：在 Windows 上通过本工具执行的 git **确实跑起来了**并返回了 git 自己关于 `ssh.exe` 的报错，说明这条路径是通的。
+2. **代价落在错的地方。** 自己拉起 Git Bash 等于**绕开 harness 的 shell 服务**，随之失去超时、输出上限、信号处理、沙箱策略接线与结果封装。
+3. **收益未测量。** 目前没有任何数据表明它更快。
+
+**若将来真的需要备选，方向不是「换哪个 bash」，而是「不用 shell」**：git 接受 argv，本插件的加固流程也已经在产出 argv，去掉 shell 这一层既更快，也免疫 shell 的解析怪癖 —— 我们刚修完的"反斜杠被 shell 吃掉导致 `command not found`"正是这一类。
+
+
 
 `workdir` 由调用参数提供，而在加这个闸门之前它**没有任何约束**：配合 `danger-full-access`（本工具刻意在沙箱外执行），模型可以在机器上任何目录运行 git —— 包括用户不希望它接触的仓库。这不是漏洞，而是一个没人明确做过的决定；现在它变成三个明确档位，默认取最保守的一档。
 
