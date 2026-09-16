@@ -1243,9 +1243,10 @@ function inspectToolCall(execution, current, cache) {
    * stalling the whole application. Refusing here also means the script never lands,
    * instead of existing and being refused when something tries to run it.
    */
-  if (current.scriptCheckPolicy !== 'off' && (execution.name === 'write' || execution.name === 'edit')) {
+  const written = writtenContent(execution.name, args)
+  if (current.scriptCheckPolicy !== 'off' && written !== undefined) {
     const target = typeof args.file_path === 'string' ? args.file_path : ''
-    const text = execution.name === 'write' ? args.content : args.new_string
+    const text = written
     if (isShellScriptTarget(target, text) && typeof text === 'string') {
       /*
        * The tier picks the matcher, and it is self-contained on purpose: borrowing the
@@ -1296,7 +1297,7 @@ function inspectToolCall(execution, current, cache) {
     const raw = args[key]
     if (typeof raw !== 'string' || raw.length === 0) continue
     // Read or write comes from the tool: file calls say what they are, unlike a shell line.
-    const kind = READ_TOOLS.has(execution.name) ? 'read' : 'write'
+    const kind = accessKindFor(execution.name, args)
     for (const row of current.pathRules) {
       const targets = rowTargets(cache, row.path)
       const reached = reachesCandidate(raw, cwd, targets.files, targets.names)
@@ -1337,6 +1338,44 @@ const WRITE_MARKERS = /(>>?|\|\s*tee\b|\btee\b|\bcp\b|\bmv\b|\brm\b|\bdd\b|\btru
 
 /** Tool names whose path argument is a read, not a write. */
 const READ_TOOLS = new Set(['read', 'grep', 'glob', 'list', 'ls', 'search', 'find'])
+
+/**
+ * The content a call would write, or undefined when it writes nothing.
+ *
+ * `write` and `edit` carry theirs directly. `str_replace_editor` carries it only in its
+ * writing commands, which is why naming the tool was not enough to check the content.
+ *
+ * @param name - the tool name.
+ * @param args - the call's arguments.
+ * @returns the text about to be written, or undefined.
+ */
+function writtenContent(name, args) {
+  if (name === 'write') return typeof args.content === 'string' ? args.content : undefined
+  if (name === 'edit') return typeof args.new_string === 'string' ? args.new_string : undefined
+  if (name === 'str_replace_editor') {
+    if (args.command === 'create') return typeof args.file_text === 'string' ? args.file_text : undefined
+    if (args.command === 'str_replace' || args.command === 'insert') {
+      return typeof args.new_str === 'string' ? args.new_str : undefined
+    }
+  }
+  return undefined
+}
+
+/**
+ * Whether a call reads or writes its path argument.
+ *
+ * The tool name decides for the file tools. An editor-shaped tool is judged by its command,
+ * because the same tool both reads and writes.
+ *
+ * @param name - the tool name.
+ * @param args - the call's arguments.
+ * @returns 'read' or 'write'.
+ */
+function accessKindFor(name, args) {
+  if (READ_TOOLS.has(name)) return 'read'
+  if (name === 'str_replace_editor' && args.command === 'view') return 'read'
+  return 'write'
+}
 
 /**
  * Whether a bash command's access to a path counts as a read or a write.
