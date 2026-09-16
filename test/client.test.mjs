@@ -448,7 +448,7 @@ describe('client bundle: loading', () => {
     // check the wording that admits the limitation, not merely that rows rendered.
     const text = JSON.stringify(renderPage(activate().calls))
     assert.ok(text.includes('原生 git'), 'the native-git row renders')
-    assert.ok(text.includes('路径黑名单'), 'the blacklist table renders')
+    assert.ok(text.includes('路径权限'), 'the blacklist table renders')
     // The wording moved into a collapsed details block, which keeps the nuance
     // reachable without owning the page.
     assert.ok(text.includes('策略闸门'), 'the page says this is a gate')

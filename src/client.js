@@ -1005,7 +1005,7 @@ window.__ModuleLoader__.load({
 
               group('闸门'),
               row(
-                '路径黑名单',
+                '路径权限',
                 React.createElement(
                   'div',
                   { className: 'git-tool-ruleList' },
