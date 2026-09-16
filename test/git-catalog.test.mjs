@@ -23,6 +23,7 @@ import {
   DEFAULT_PROTECTION_ROWS,
   migrateProtectionRows,
   mentionsProtectedPath,
+  reachesProtectedPath,
   hardenArgv,
   invokesGit,
   shellQuote,
@@ -564,6 +565,21 @@ describe('a credential URL is refused in any position', () => {
     it('still runs a plain rebase', () => {
       assert.equal(validateArgv(['rebase', 'origin/main']).ok, true)
       assert.equal(validateArgv(['rebase', '--interactive', 'origin/main']).ok, true)
+    })
+  })
+
+  describe('a protected directory covers what is inside it', () => {
+    const dir = '/home/me/private'
+
+    it('reaches a file inside the entry, and the entry itself, and an ancestor', () => {
+      assert.equal(reachesProtectedPath(dir + '/secret.txt', [dir]), dir)
+      assert.equal(reachesProtectedPath(dir, [dir]), dir)
+      assert.equal(reachesProtectedPath('/home/me', [dir]), dir)
+    })
+
+    it('does not reach a sibling that merely shares a prefix', () => {
+      assert.equal(reachesProtectedPath(dir + '2/other.txt', [dir]), undefined)
+      assert.equal(reachesProtectedPath('/home/me/priv', [dir]), undefined)
     })
   })
 
