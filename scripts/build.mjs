@@ -37,6 +37,13 @@ import {
   DEFAULT_SCRIPT_CHECK_POLICY,
   DEFAULT_TARGET_SCOPE,
   DEFAULT_PROTECTION_ROWS,
+  NATIVE_GIT_POLICIES,
+  GUARD_POLICIES,
+  CONFIG_POLICIES,
+  SCRIPT_CHECK_POLICIES,
+  TARGET_SCOPES,
+  BASH_PATH_MODES,
+  GUARD_ERROR_POLICIES,
   DEFAULT_BASH_PATH_MODE,
   describeCatalog,
 } from '../src/git-catalog.js'
@@ -129,6 +136,21 @@ function serializeCatalog() {
       dangerousKeyPolicy: DEFAULT_CONFIG_POLICY,
       useHostCredentials: false,
       nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
+      /*
+       * Every tier list the page offers, so the page and the Host cannot disagree about which
+       * tiers exist or in what order. The page keeps only the wording; a tier present on one
+       * side alone then shows up (an unknown id is labelled with itself) instead of going
+       * missing quietly.
+       */
+      tierIds: {
+        nativeGit: [...NATIVE_GIT_POLICIES],
+        guard: [...GUARD_POLICIES],
+        config: [...CONFIG_POLICIES],
+        scriptCheck: [...SCRIPT_CHECK_POLICIES],
+        targetScope: [...TARGET_SCOPES],
+        bashPathMode: [...BASH_PATH_MODES],
+        guardError: [...GUARD_ERROR_POLICIES],
+      },
       scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
       protectionRows: DEFAULT_PROTECTION_ROWS.map((row) => ({ ...row })),
       bashPathMode: DEFAULT_BASH_PATH_MODE,
