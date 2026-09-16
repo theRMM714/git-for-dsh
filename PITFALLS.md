@@ -638,3 +638,17 @@ const word = command.slice(start, index)   // → word 为空，index 原地不�
 **谁守着**：`test/host.test.mjs` 的三条档位用例（严格／限制／关闭的行为）加 `reads the boolean the tier replaced`（迁移），以及 `test/client.test.mjs` 里把 Host 的档位列表喂进客户端解码器的往返测试。
 
 ---
+
+## 36. Windows 的空设备 `NUL`：git 认它，Node 不认 —— 而且 Node 会把它写成真文件
+
+**背景**：`buildEnv()` 用**平台空设备**隐藏用户级配置、并让仓库钩子不被运行（Windows 上是 `NUL`，其余是 `/dev/null`）。Windows 侧做真机验证时，验证脚本要在工作目录里检查这个设备。
+
+**根因**：`NUL` 是**设备名**，不是文件路径 —— 它由 Win32 在**打开时**解释。git for Windows 走 MSYS2 打开它，行为与 `/dev/null` 完全一致（真机 22 项断言全绿，其中两组是对照实验：未钉住时钩子真的把提交拦下、用户级配置里的键真的读得到；钉住后钩子**从未**运行、那个键读不到）。但 **Node 的 `fs` 不解释设备名**：`existsSync('NUL')` 为 `false`，`statSync`／`readFileSync` 报 ENOENT；更糟的是 `fs.writeFileSync('NUL', …)` —— 它会经 `\\?\` 长路径在**当前目录创建一个真实的文件 `NUL`**。
+
+**代价**：那个真文件**删不掉**（资源管理器、PowerShell `Remove-Item`、libuv `unlink` 都失败），只能用 `fs.unlinkSync('\\\\?\\' + 绝对路径)`；而它留在工作树里会让 `git add -A` 直接失败（`fatal: unable to stat 'NUL': No such file or directory`，exit 128）—— "清理自己留下的痕迹"于是变成一次解谜。
+
+**怎么避**：**不要用 Node 的 fs 去校验或写入空设备**。要验证就验证**谁在解释它**：给 git 一组对照实验（钩子是否真的没跑、用户级配置是否真的读不到），而不是检查"环境变量里写了什么"。清理时优先用 `\\?\` 前缀的绝对路径，或干脆避免对设备名做文件操作。
+
+**一般化**：**跨平台的值要按"谁解释它"来验证** —— 同一个字符串交给 shell、git、Node 还是内核，解释规则各不相同，"我这边看着对"证明不了任何事。
+
+**谁守着**：`test/git-catalog.test.mjs` 断言 `NULL_DEVICE` 按平台取值、且强制配置表与它一致；Windows 真机侧本次另用了一份 `verify-nul-device.mjs` 做行为对照（尚未入库）。

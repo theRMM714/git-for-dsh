@@ -176,8 +176,8 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 
 - `GIT_TERMINAL_PROMPT=0`、`GIT_ASKPASS=''` —— 不等待终端输入。
 - `core.pager=cat`、`GIT_EDITOR=true`、`GIT_SEQUENCE_EDITOR=true` —— 不分页、不打开编辑器。
-- `core.hooksPath=/dev/null` —— 不运行仓库钩子。
-- `credential.helper=` 清空，并且**默认**隐藏 `~/.gitconfig` 与系统配置（`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 指向 `/dev/null`）—— 用户级配置里的 `alias`、`url.insteadOf`、`credential.helper` 都不会生效。
+- `core.hooksPath` 指向**平台空设备**（Windows 上为 `NUL`，其余为 `/dev/null`）—— 不运行仓库钩子。
+- `credential.helper=` 清空，并且**默认**隐藏 `~/.gitconfig` 与系统配置（`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 指向平台空设备，Windows 上为 `NUL`）—— 用户级配置里的 `alias`、`url.insteadOf`、`credential.helper` 都不会生效。
 - 子进程环境由 harness 擦除名字含 `KEY|PASSWORD|SECRET|TOKEN` 的变量。
 - 默认取会话工作区作为工作目录，而不是 shell 自身的默认目录。
 
