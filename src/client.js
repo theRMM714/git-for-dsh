@@ -155,11 +155,6 @@ window.__ModuleLoader__.load({
       /** A row as the settings document stores it: the boxes, and nothing derived. */
       const storableRow = (row) => ({ path: row.path, read: row.read === true, write: row.write === true, ask: row.ask === true })
 
-      // Asked once, on appear: the answer changes only when the settings file or the schema does.
-      React.useEffect(() => {
-        checkConfiguration()
-      }, [])
-
       /** How a path named in a bash command is judged. Stated as a heuristic, because it is. */
       /** What the guard does when IT fails. Two options, because both are defensible. */
       const GUARD_ERROR_COPY = [
@@ -678,6 +673,12 @@ window.__ModuleLoader__.load({
           })
           .catch(() => setConfigHealth({ retired: [], error: '无法连接宿主' }))
       }
+
+      // Asked once, when the page appears: the answer changes only when the settings file or
+      // the schema does.
+      React.useEffect(() => {
+        checkConfiguration()
+      }, [])
 
       const writePolicy = (field, next) => {
             setDraft({ ...value, [field]: next })
