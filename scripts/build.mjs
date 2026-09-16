@@ -32,7 +32,6 @@ import { fileURLToPath } from 'node:url'
 import {
   DEFAULT_CONFIG_POLICY,
   DEFAULT_ENABLED,
-  DEFAULT_GUARD_POLICY,
   DEFAULT_NATIVE_GIT_POLICY,
   DEFAULT_SSH_COMMAND,
   DEFAULT_SCRIPT_CHECK_POLICY,
@@ -130,7 +129,6 @@ function serializeCatalog() {
       dangerousKeyPolicy: DEFAULT_CONFIG_POLICY,
       useHostCredentials: false,
       nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
-      pathGuardPolicy: DEFAULT_GUARD_POLICY,
       scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
       protectionRows: DEFAULT_PROTECTION_ROWS.map((row) => ({ ...row })),
       bashPathMode: DEFAULT_BASH_PATH_MODE,
