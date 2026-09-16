@@ -402,6 +402,24 @@ describe('the blacklist rows come from the stored document or the defaults', () 
   })
 })
 
+describe('a command word is recognised in either platform spelling', () => {
+  // Built from its code point so no escaping layer can quietly change what is tested.
+  const bs = String.fromCharCode(92)
+  const winGit = "C:" + bs + "Program Files" + bs + "Git" + bs + "cmd" + bs + "git.exe"
+
+  it('catches the Windows forms', () => {
+    assert.equal(containsNativeGit('"' + winGit + '" status'), true)
+    assert.equal(containsNativeGit('.' + bs + 'git status'), true)
+    assert.equal(containsNativeGit('git.exe status'), true)
+  })
+
+  it('still leaves a name that merely contains git alone', () => {
+    assert.equal(containsNativeGit('node_modules/git/thing'), false)
+    assert.equal(containsNativeGit('my-git-script run'), false)
+    assert.equal(containsNativeGit('git-for-dsh run'), false)
+  })
+})
+
 describe('the matcher always terminates', () => {
   // The freeze, as a test. Before the fix each of these spun forever inside the guard, so
   // the suite hanging IS the failure — and `--test-timeout` in package.json turns that into
