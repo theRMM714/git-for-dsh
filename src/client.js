@@ -615,9 +615,16 @@ window.__ModuleLoader__.load({
           }
 
           const catalog = CATALOG
-          const tiers = Array.isArray(catalog.catalog) ? catalog.catalog : []
-          const allNames = tiers.flatMap((tier) =>
-            (tier.groups || []).flatMap((group) => (group.operations || []).map((operation) => operation.name)),
+          /*
+           * Memoised: the page re-renders on every keystroke of an unrelated text draft, and
+           * these two passes walk the whole operation catalog. The catalog is a build constant,
+           * so the tier list never changes, and the flat name list changes only with it.
+           */
+          const tiers = React.useMemo(() => (Array.isArray(CATALOG.catalog) ? CATALOG.catalog : []), [])
+          const allNames = React.useMemo(
+            () => tiers.flatMap((tier) =>
+              (tier.groups || []).flatMap((group) => (group.operations || []).map((operation) => operation.name))),
+            [tiers],
           )
           // The draft wins while it lasts: in memory persistence the snapshot never
           // carries the value, so without this a toggle would visually snap back

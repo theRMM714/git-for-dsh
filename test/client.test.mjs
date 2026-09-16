@@ -72,6 +72,16 @@ const React = {
   useEffect() {
     requireRender('useEffect')
   },
+  // Memoisation is transparent to these tests, so the stub computes every time; the render
+  // guard applies here too, because a hook outside a component is equally wrong for these.
+  useMemo(factory) {
+    requireRender('useMemo')
+    return factory()
+  },
+  useCallback(fn) {
+    requireRender('useCallback')
+    return fn
+  },
   Component: class {
     constructor(props) {
       this.props = props ?? {}
