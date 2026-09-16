@@ -44,6 +44,11 @@ import {
   SCRIPT_CHECK_POLICIES,
   DEFAULT_SCRIPT_CHECK_POLICY,
   TARGET_SCOPES,
+  DEFAULT_PROTECTED_PATHS_ENABLED,
+  CREDENTIAL_PATHS,
+  DEFAULT_CREDENTIAL_POLICY,
+  IDENTITY_PATHS,
+  DEFAULT_IDENTITY_POLICY,
   DEFAULT_TARGET_SCOPE,
   DEFAULT_SSH_COMMAND,
   DEFAULT_PROTECTED_PATHS,
@@ -150,10 +155,29 @@ export const Config = z.object({
    * runtime is not stopped, which is why this is documented as a rule and not a
    * boundary.
    */
-  pathGuardPolicy: z
+  /**
+   * Whether the operator's own protected list is enforced.
+   *
+   * Two states, not three: the list means "the AI must not touch this", so there is nothing
+   * useful to ask about. Turning it off keeps the list for later — that was the point.
+   */
+  protectedPathsEnabled: z
+    .boolean()
+    .default(DEFAULT_PROTECTED_PATHS_ENABLED)
+    .description('Enforce the protected-paths list. Off means the list is kept but not applied.'),
+  /**
+   * The built-in credential files.
+   *
+   * No schema default: this key is read by the migration below, and a default would mask
+   * whether the operator ever chose (PITFALLS 35).
+   */
+  credentialPolicy: z
     .union(GUARD_POLICIES.map((policy) => z.const(policy)))
-    .default(DEFAULT_GUARD_POLICY)
-    .description('What to do when a tool call names a protected credential path: deny (default), ask, or allow.'),
+    .description('What to do when a tool call names a stored credential file: deny (default), ask, or allow.'),
+  /** The built-in identity and configuration files. Same reasoning as credentialPolicy. */
+  identityPolicy: z
+    .union(GUARD_POLICIES.map((policy) => z.const(policy)))
+    .description('What to do when a tool call names an identity or configuration file: ask (default), deny, or allow.'),
   /**
    * How hard to judge a shell script WHEN IT IS WRITTEN.
    *
@@ -518,6 +542,34 @@ function normalizeScriptCheck(value) {
   return DEFAULT_SCRIPT_CHECK_POLICY
 }
 
+/**
+ * Whether the operator's list is enforced, including the tier that came before it.
+ *
+ * The old single tier served both the list and the built-in files. A non-allow tier meant the
+ * list was enforced, so that is what it migrates to; allow migrates to off. The direction
+ * matters: an unclear old value stays strict.
+ *
+ * @param value - the stored settings section.
+ * @returns true when the list should be enforced.
+ */
+function normalizeProtectedEnabled(value) {
+  if (typeof value?.protectedPathsEnabled === 'boolean') return value.protectedPathsEnabled
+  const legacy = value?.pathGuardPolicy
+  if (typeof legacy === 'string' && GUARD_POLICIES.includes(legacy)) return legacy !== 'allow'
+  return DEFAULT_PROTECTED_PATHS_ENABLED
+}
+
+/**
+ * A group's tier, falling back when the stored value is not one of them.
+ *
+ * @param stored - the stored value, if any.
+ * @param fallback - the default for that group.
+ * @returns one of GUARD_POLICIES.
+ */
+function normalizeGroupPolicy(stored, fallback) {
+  return typeof stored === 'string' && GUARD_POLICIES.includes(stored) ? stored : fallback
+}
+
 function normalizePolicy(value) {
   const enabled = Array.isArray(value?.enabled)
     ? value.enabled.filter((item) => typeof item === 'string' && OPERATIONS.has(item))
@@ -530,6 +582,9 @@ function normalizePolicy(value) {
     nativeGitPolicy: NATIVE_GIT_POLICIES.includes(value?.nativeGitPolicy)
       ? value.nativeGitPolicy
       : DEFAULT_NATIVE_GIT_POLICY,
+    protectedPathsEnabled: normalizeProtectedEnabled(value),
+    credentialPolicy: normalizeGroupPolicy(value?.credentialPolicy, DEFAULT_CREDENTIAL_POLICY),
+    identityPolicy: normalizeGroupPolicy(value?.identityPolicy, DEFAULT_IDENTITY_POLICY),
     pathGuardPolicy: GUARD_POLICIES.includes(value?.pathGuardPolicy) ? value.pathGuardPolicy : DEFAULT_GUARD_POLICY,
     protectedPaths: Array.isArray(value?.protectedPaths)
       ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
