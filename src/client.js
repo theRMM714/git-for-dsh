@@ -138,6 +138,18 @@ window.__ModuleLoader__.load({
       /** Whether this path is one of the built-in rows. */
       const isBuiltinRow = (path) => (CATALOG.defaults.protectionRows ?? []).some((row) => row.path === path)
 
+      /**
+       * Whether a row offers a delete button. Built-in rows do not.
+       *
+       * Takes the row as it is, because rows arrive in two shapes: one from the settings
+       * document (which may carry `builtin`) and one from the draft a write produces (which
+       * never does). The path decides, so both shapes answer the same.
+       *
+       * @param rule - a blacklist row.
+       * @returns true when the operator may remove it.
+       */
+      const rowIsDeletable = (rule) => !(rule.builtin === true || isBuiltinRow(rule.path))
+
       /** A row as the settings document stores it: the boxes, and nothing derived. */
       const storableRow = (row) => ({ path: row.path, read: row.read === true, write: row.write === true, ask: row.ask === true })
 
@@ -895,17 +907,14 @@ window.__ModuleLoader__.load({
                       }),
                       label,
                     )),
-                    // Derived here rather than trusted from the row: a row that came back
-                    // from a write carries no builtin flag, and the delete button must not
-                    // depend on which of the two paths produced it.
-                    rule.builtin === true || isBuiltinRow(rule.path)
-                      ? React.createElement('span', { className: 'git-tool-ruleNote' }, '内置')
-                      : React.createElement('button', {
+                    rowIsDeletable(rule)
+                      ? React.createElement('button', {
                         type: 'button',
                         className: 'git-tool-testButton',
                         disabled: !canWrite,
                         onClick: () => writePolicy('pathRules', (value.pathRules ?? []).filter((other) => other.path !== rule.path).map(storableRow)),
-                      }, '删除'),
+                      }, '删除')
+                      : React.createElement('span', { className: 'git-tool-ruleNote' }, '内置'),
                   )),
                   React.createElement(
                     'div',
@@ -1387,6 +1396,7 @@ window.__ModuleLoader__.load({
       // Exported for the suite: this classification is where the "Unexpected end of
       // JSON input" defect lived, and it cannot regress if a test calls it.
       exports.classifyJsonResponse = classifyJsonResponse
+      exports.rowIsDeletable = rowIsDeletable
       exports.inject = inject
       exports.apply = apply
       exports.message = message

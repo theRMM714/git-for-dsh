@@ -279,6 +279,30 @@ describe('client bundle: loading', () => {
     assert.equal(decode({ nativeGitPolicy: 'nonsense' }).nativeGitPolicy, 'deny')
   })
 
+  it('offers no delete button for a built-in row, in either shape a row arrives in', () => {
+    // A row the operator added comes back from a write with no builtin key — which is exactly
+    // when the buttons appeared. The decision is asserted for both shapes, because a
+    // rendering test only ever sees the other one.
+    const { exports } = loadPlugin()
+    assert.equal(exports.rowIsDeletable({ path: '~/.gitconfig', read: false, write: false, ask: false }), false)
+    assert.equal(exports.rowIsDeletable({ path: '~/.gitconfig', read: true, write: false, ask: false, builtin: true }), false)
+    assert.equal(exports.rowIsDeletable({ path: '/home/me/private', read: false, write: false, ask: false }), true)
+  })
+
+  it('adds a path through the button without throwing', () => {
+    // The button once did nothing: its handler sat in a scope that could not see the draft, so
+    // clicking threw a ReferenceError that the event handler swallowed — invisible in any
+    // assertion about what the page renders.
+    const page = renderPage(activate().calls)
+    const input = collect(page, (element) => element.props?.className === 'git-tool-input'
+      && element.props?.placeholder?.includes('再加一条路径'))
+    assert.equal(input.length, 1, 'the add-path input renders')
+    assert.doesNotThrow(() => input[0].props.onChange({ target: { value: '/home/me/private' } }))
+    const add = collect(page, (element) => element.type === 'button' && element.children?.join('') === '添加')
+    assert.equal(add.length, 1, 'the add button renders')
+    assert.doesNotThrow(() => add[0].props.onClick())
+  })
+
   it('offers reading and clearing the log on its own tab', () => {
     const page = renderPage(activate().calls)
     const buttons = collect(page, (element) => element.type === 'button')
