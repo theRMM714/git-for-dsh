@@ -47,7 +47,9 @@ export function formatValue(value) {
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   const text = typeof value === 'string' ? value : JSON.stringify(value ?? null)
   const safe = text
-    .replace(/\/\/[^/\s@]+:[^/\s@]*@/g, '//<redacted>@')
+    // The password is optional: https://token@host carries one just as
+    // https://user:password@host does, and both are credentials.
+    .replace(/\/\/[^/\s@]+@/g, '//<redacted>@')
     .replace(/\b(ghp|gho|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}/g, '<redacted-token>')
     .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, '<redacted-token>')
     .replace(/(Authorization:\s*\S+\s+)[A-Za-z0-9._-]{16,}/gi, '$1<redacted-token>')
