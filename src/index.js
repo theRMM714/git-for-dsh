@@ -51,7 +51,7 @@ import {
   IDENTITY_PATHS,
   DEFAULT_IDENTITY_POLICY,
   DEFAULT_PROTECTION_ROWS,
-  migrateProtectionRows,
+  resolveProtectionRows,
   BASH_PATH_MODES,
   DEFAULT_BASH_PATH_MODE,
   DEFAULT_TARGET_SCOPE,
@@ -626,7 +626,7 @@ function normalizePolicy(value) {
       ? value.nativeGitPolicy
       : DEFAULT_NATIVE_GIT_POLICY,
     protectedPathsEnabled: normalizeProtectedEnabled(value),
-    pathRules: migrateProtectionRows(value),
+    pathRules: resolveProtectionRows(value),
     bashPathMode: BASH_PATH_MODES.includes(value?.bashPathMode) ? value.bashPathMode : DEFAULT_BASH_PATH_MODE,
     credentialPolicy: normalizeGroupPolicy(value?.credentialPolicy, DEFAULT_CREDENTIAL_POLICY),
     identityPolicy: normalizeGroupPolicy(value?.identityPolicy, DEFAULT_IDENTITY_POLICY),
