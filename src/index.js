@@ -45,18 +45,12 @@ import {
   SCRIPT_CHECK_POLICIES,
   DEFAULT_SCRIPT_CHECK_POLICY,
   TARGET_SCOPES,
-  DEFAULT_PROTECTED_PATHS_ENABLED,
-  CREDENTIAL_PATHS,
-  DEFAULT_CREDENTIAL_POLICY,
-  IDENTITY_PATHS,
-  DEFAULT_IDENTITY_POLICY,
   DEFAULT_PROTECTION_ROWS,
   resolveProtectionRows,
   BASH_PATH_MODES,
   DEFAULT_BASH_PATH_MODE,
   DEFAULT_TARGET_SCOPE,
   DEFAULT_SSH_COMMAND,
-  DEFAULT_PROTECTED_PATHS,
   containsNativeGit,
   mentionsProtectedPath,
   reachesProtectedPath,
@@ -185,33 +179,6 @@ export const Config = z.object({
     .union(BASH_PATH_MODES.map((mode) => z.const(mode)))
     .default(DEFAULT_BASH_PATH_MODE)
     .description('How a path named in a bash command is judged: heuristic (obvious reads as reads, everything else as a write) or write-only (any mention counts as a write).'),
-  protectedPathsEnabled: z
-    .boolean()
-    .description('Enforce the protected-paths list. Off means the list is kept but not applied.'),
-  /**
-   * The built-in credential files.
-   *
-   * No schema default: this key is read by the migration below, and a default would mask
-   * whether the operator ever chose (PITFALLS 35).
-   */
-  /**
-   * The tier setting `migrateProtectionRows` reads.
-   *
-   * Declared for two reasons: a stored document still validates, and the value reaches
-   * normalizePolicy at all — validation drops keys the schema does not declare, which would
-   * make the migration dead code. Deliberately no default: a default fills the key
-   * first and masks the very value the migration reads (PITFALLS 35).
-   */
-  pathGuardPolicy: z
-    .union(GUARD_POLICIES.map((policy) => z.const(policy)))
-    .description('Deprecated: superseded by protectedPathsEnabled, credentialPolicy and identityPolicy.'),
-  credentialPolicy: z
-    .union(GUARD_POLICIES.map((policy) => z.const(policy)))
-    .description('What to do when a tool call names a stored credential file: deny (default), ask, or allow.'),
-  /** The built-in identity and configuration files. Same reasoning as credentialPolicy. */
-  identityPolicy: z
-    .union(GUARD_POLICIES.map((policy) => z.const(policy)))
-    .description('What to do when a tool call names an identity or configuration file: ask (default), deny, or allow.'),
   /**
    * How hard to judge a shell script WHEN IT IS WRITTEN.
    *
@@ -312,11 +279,6 @@ export const Config = z.object({
     .array(z.string())
     .default([])
     .description('Root directories git may run inside when targetScope is allowlist. One per entry; a target must fall inside one of them.'),
-  /** The paths the guard protects. */
-  protectedPaths: z
-    .array(z.string())
-    .default([...DEFAULT_PROTECTED_PATHS])
-    .description('Paths whose contents are credentials or identity. A path argument that IS one of them, or CONTAINS one, is refused; shell text that names one is refused too.'),
   /**
    * Port for the operator's OWN proxy, which this plugin starts and nothing more.
    *
@@ -364,10 +326,6 @@ export const DEFAULT_CONFIG = Object.freeze({
   dangerousKeyPolicy: DEFAULT_CONFIG_POLICY,
   useHostCredentials: false,
   nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
-  protectedPathsEnabled: DEFAULT_PROTECTED_PATHS_ENABLED,
-  credentialPolicy: DEFAULT_CREDENTIAL_POLICY,
-  identityPolicy: DEFAULT_IDENTITY_POLICY,
-  protectedPaths: DEFAULT_PROTECTED_PATHS,
   scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
   targetScope: DEFAULT_TARGET_SCOPE,
   targetPaths: [],
@@ -588,20 +546,6 @@ function normalizeScriptCheck(value) {
  * @param value - the stored settings section.
  * @returns true when the list should be enforced.
  */
-function normalizeProtectedEnabled(value) {
-  const enabled = value?.protectedPathsEnabled
-  /*
-   * The default value does NOT mean "unset" here: the plugin's own base object spreads
-   * DEFAULT_CONFIG, so this key is always present and cannot be distinguished from a choice.
-   * An explicit non-default value therefore wins, and only when it is absent or equal to the
-   * default does the legacy tier decide.
-   */
-  if (typeof enabled === 'boolean' && enabled !== DEFAULT_PROTECTED_PATHS_ENABLED) return enabled
-  const legacy = value?.pathGuardPolicy
-  if (typeof legacy === 'string' && GUARD_POLICIES.includes(legacy)) return legacy !== 'allow'
-  return typeof enabled === 'boolean' ? enabled : DEFAULT_PROTECTED_PATHS_ENABLED
-}
-
 /**
  * A group's tier, falling back when the stored value is not one of them.
  *
@@ -609,10 +553,6 @@ function normalizeProtectedEnabled(value) {
  * @param fallback - the default for that group.
  * @returns one of GUARD_POLICIES.
  */
-function normalizeGroupPolicy(stored, fallback) {
-  return typeof stored === 'string' && GUARD_POLICIES.includes(stored) ? stored : fallback
-}
-
 function normalizePolicy(value) {
   const enabled = Array.isArray(value?.enabled)
     ? value.enabled.filter((item) => typeof item === 'string' && OPERATIONS.has(item))
@@ -625,14 +565,8 @@ function normalizePolicy(value) {
     nativeGitPolicy: NATIVE_GIT_POLICIES.includes(value?.nativeGitPolicy)
       ? value.nativeGitPolicy
       : DEFAULT_NATIVE_GIT_POLICY,
-    protectedPathsEnabled: normalizeProtectedEnabled(value),
     pathRules: resolveProtectionRows(value),
     bashPathMode: BASH_PATH_MODES.includes(value?.bashPathMode) ? value.bashPathMode : DEFAULT_BASH_PATH_MODE,
-    credentialPolicy: normalizeGroupPolicy(value?.credentialPolicy, DEFAULT_CREDENTIAL_POLICY),
-    identityPolicy: normalizeGroupPolicy(value?.identityPolicy, DEFAULT_IDENTITY_POLICY),
-    protectedPaths: Array.isArray(value?.protectedPaths)
-      ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
-      : [...DEFAULT_PROTECTED_PATHS],
     scriptCheckPolicy: normalizeScriptCheck(value),
     targetScope: typeof value?.targetScope === 'string' && TARGET_SCOPES.includes(value.targetScope)
       ? value.targetScope
@@ -1718,7 +1652,6 @@ function setup(ctx, entry = {}) {
     pluginEnabled: policy.current.pluginEnabled,
     operations: policy.current.enabled.length,
     nativeGit: policy.current.nativeGitPolicy,
-    pathGuard: policy.current.pathGuardPolicy,
     scanScripts: policy.current.scanScripts,
     sshCommand: policy.current.sshCommand,
     hostCredentials: policy.current.useHostCredentials,
