@@ -539,6 +539,26 @@ function bindPolicy(ctx, base) {
  * @param settings - the settings service.
  * @returns the leftover key names, sorted.
  */
+/**
+ * What the guard decides when it has thrown.
+ *
+ * Pure: the operator's answer to "the guard is broken" is a policy, so it is judged directly
+ * rather than through a listener that has already failed. 'allow' returns undefined, which is
+ * the caller's signal to delegate.
+ *
+ * @param policy - GUARD_ERROR_POLICIES.
+ * @param error - what the guard threw.
+ * @returns the decision to return, or undefined to delegate.
+ */
+export function guardFailureVerdict(policy, error) {
+  if (policy !== 'ask') return undefined
+  return {
+    kind: 'ask',
+    reason: '工具守卫自身出错了（' + (error instanceof Error ? error.message : String(error))
+      + '），因此这次调用是否放行由你决定。这是守卫的缺陷，请把它连同诊断日志一起反馈。',
+  }
+}
+
 export function retiredKeys(settings) {
   if (typeof settings.describe !== 'function') return []
   const descriptor = settings.describe().find((entry) => String(entry.ns) === NAMESPACE)
@@ -1798,13 +1818,8 @@ function setup(ctx, entry = {}) {
       ctx.logger?.warn?.(`git-tool: the tool guard failed: ${error instanceof Error ? error.message : String(error)}`)
       // The failure is the guard's, not the command's, and the message says so: the operator is
       // being asked about a defect, which is what makes a broken guard visible.
-      if ((current.guardErrorPolicy ?? DEFAULT_GUARD_ERROR_POLICY) === 'ask') {
-        return {
-          kind: 'ask',
-          reason: '工具守卫自身出错了（' + (error instanceof Error ? error.message : String(error))
-            + '），因此这次调用是否放行由你决定。这是守卫的缺陷，请把它连同诊断日志一起反馈。',
-        }
-      }
+      const failure = guardFailureVerdict(current.guardErrorPolicy ?? DEFAULT_GUARD_ERROR_POLICY, error)
+      if (failure !== undefined) return failure
     }
     return next()
   })
