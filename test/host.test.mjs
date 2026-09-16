@@ -29,7 +29,21 @@ function fakeContext(options = {}) {
   // Diagnostics off by default in tests: the log's default path is the operator's real
   // file, and the heartbeat writes to it on a timer — which is how a test run once put 60
   // heartbeat lines into their log. A test that wants either passes it explicitly.
-  let settingsValue = options.settings ?? { ...DEFAULT_CONFIG, logEnabled: false, heartbeat: false }
+  // Diagnostics off, and the target scope open by DEFAULT: this fixture drives the tool
+  // from arbitrary workdirs to exercise the OTHER gates, and the scope gate would refuse
+  // them first. It is spread first so that a test which sets targetScope itself — the scope
+  // tests do — still wins.
+  const rawSettings = options.settings ?? {}
+  let settingsValue = {
+    ...DEFAULT_CONFIG,
+    logEnabled: false,
+    heartbeat: false,
+    ...rawSettings,
+  }
+  // The scope is open UNLESS the test asked for one: the settings service validates the
+  // document, so the schema default would otherwise fill 'workspace' and refuse every call
+  // that drives the tool from an arbitrary workdir to exercise the other gates.
+  if (!('targetScope' in rawSettings)) settingsValue.targetScope = 'unrestricted'
   const listeners = new Set()
   // Mirrors the REAL host-side SettingsScope: get/watch/update/replace. A
   // fixture with subscribe()/set() would let a bug pass, because the settings
@@ -199,7 +213,10 @@ function fakeContext(options = {}) {
 /** Register the plugin against a fake context and return the `git_exec` definition. */
 function mount(options) {
   const { ctx, recorded, setSettings, settings } = fakeContext(options)
-  applyUnguarded(ctx, options?.entry ?? {})
+  // The scope is open by default here: this fixture drives the tool from arbitrary
+  // workdirs to exercise the other gates. A test that sets targetScope itself still wins,
+  // because the entry is spread first and the stored settings are read over it.
+  applyUnguarded(ctx, { targetScope: 'unrestricted', ...(options?.entry ?? {}) })
   const definition = ctx.tools.registered.find((tool) => tool.name === 'git_exec')
   assert.ok(definition !== undefined, 'git_exec must be registered')
   return { definition, recorded, setSettings, settings }
@@ -553,6 +570,33 @@ describe('host plugin: the audit can be switched off', () => {
     await definition.execute({ ...CALL, argv: ['status'] }, execution())
     assert.equal(recorded.runs.filter((spec) => AUDIT_COMMAND.test(spec.command)).length, 0, 'no audit call')
     assert.equal(executed(recorded).length, 1, 'and the command ran')
+  })
+})
+
+describe('host plugin: the target scope', () => {
+  const run = (extra, workdir) => {
+    const { definition } = mount({ settings: { ...DEFAULT_CONFIG, logEnabled: false, heartbeat: false, ...extra } })
+    return definition.execute({ ...CALL, argv: ['status'], workdir }, execution())
+  }
+
+  it('refuses a target outside the session workspace by default', async () => {
+    await assert.rejects(() => run({ targetScope: 'workspace' }, '/elsewhere/repo'), /不在本次会话的工作区/)
+    await assert.doesNotReject(() => run({ targetScope: 'workspace' }, '/fake/cwd'))
+  })
+
+  it('compares by path segment, so a sibling is not inside', async () => {
+    // /fake/cwd2 must not count as being inside /fake/cwd — the classic prefix mistake.
+    await assert.rejects(() => run({ targetScope: 'workspace' }, '/fake/cwd2'), /不在本次会话的工作区/)
+  })
+
+  it('allows only the listed roots, and refuses when none are listed', async () => {
+    await assert.doesNotReject(() => run({ targetScope: 'allowlist', targetPaths: ['/elsewhere'] }, '/elsewhere/repo'))
+    await assert.rejects(() => run({ targetScope: 'allowlist', targetPaths: ['/elsewhere'] }, '/other/repo'), /不在允许的根目录内/)
+    await assert.rejects(() => run({ targetScope: 'allowlist', targetPaths: [] }, '/elsewhere/repo'), /一个允许的根目录都没有配置/)
+  })
+
+  it('still permits anywhere when asked to', async () => {
+    await assert.doesNotReject(() => run({ targetScope: 'unrestricted' }, '/anywhere/at/all'))
   })
 })
 

@@ -1257,6 +1257,18 @@ export const SCRIPT_CHECK_POLICIES = Object.freeze(['strict', 'restrict', 'off']
 export const DEFAULT_SCRIPT_CHECK_POLICY = 'strict'
 
 /**
+ * Where a git command is allowed to run.
+ *
+ *   workspace     only inside the session's own workspace (the default)
+ *   allowlist     only inside the roots the operator listed
+ *   unrestricted  anywhere (what this tool did before the choice existed)
+ */
+export const TARGET_SCOPES = Object.freeze(['workspace', 'allowlist', 'unrestricted'])
+
+/** The default: the session's own workspace, and nothing else. */
+export const DEFAULT_TARGET_SCOPE = 'workspace'
+
+/**
  * Read the key names out of `git config --name-only -z` output.
  * @param text - the command's stdout.
  * @returns the key names, lowercased for matching, with duplicates removed.

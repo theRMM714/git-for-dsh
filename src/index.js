@@ -43,6 +43,8 @@ import {
   createBudget,
   SCRIPT_CHECK_POLICIES,
   DEFAULT_SCRIPT_CHECK_POLICY,
+  TARGET_SCOPES,
+  DEFAULT_TARGET_SCOPE,
   DEFAULT_SSH_COMMAND,
   DEFAULT_PROTECTED_PATHS,
   containsNativeGit,
@@ -237,6 +239,21 @@ export const Config = z.object({
     .boolean()
     .default(false)
     .description('Optional. A heartbeat line every 5 seconds, naming any call stuck in flight and for how long. It was what located a hang inside a call; turn it on when investigating one, off otherwise.'),
+  /**
+   * Where a git command may run.
+   *
+   * The workdir arrives in the tool call, and before this existed it was not constrained at
+   * all: the model could point git at any directory on the machine.
+   */
+  targetScope: z
+    .union(TARGET_SCOPES.map((scope) => z.const(scope)))
+    .default(DEFAULT_TARGET_SCOPE)
+    .description('Where git may run: workspace (only the session workspace, the default), allowlist (only the roots below), or unrestricted (anywhere).'),
+  /** The roots the allowlist mode permits. */
+  targetPaths: z
+    .array(z.string())
+    .default([])
+    .description('Root directories git may run inside when targetScope is allowlist. One per entry; a target must fall inside one of them.'),
   /** The paths the guard protects. */
   protectedPaths: z
     .array(z.string())
@@ -292,6 +309,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   pathGuardPolicy: DEFAULT_GUARD_POLICY,
   protectedPaths: DEFAULT_PROTECTED_PATHS,
   scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
+  targetScope: DEFAULT_TARGET_SCOPE,
+  targetPaths: [],
   scanScripts: true,
   heartbeat: false,
   sshCommand: DEFAULT_SSH_COMMAND,
@@ -513,6 +532,12 @@ function normalizePolicy(value) {
       ? value.protectedPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
       : [...DEFAULT_PROTECTED_PATHS],
     scriptCheckPolicy: normalizeScriptCheck(value),
+    targetScope: typeof value?.targetScope === 'string' && TARGET_SCOPES.includes(value.targetScope)
+      ? value.targetScope
+      : DEFAULT_TARGET_SCOPE,
+    targetPaths: Array.isArray(value?.targetPaths)
+      ? value.targetPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+      : [],
     scanScripts: value?.scanScripts !== false,
     heartbeat: value?.heartbeat === true,
     sshCommand: typeof value?.sshCommand === 'string' && value.sshCommand.trim().length > 0
@@ -1137,6 +1162,69 @@ function inspectToolCall(execution, current, cache) {
 }
 
 
+/**
+ * Resolve a directory for comparison, following symlinks when it exists.
+ *
+ * @param path - the path to resolve.
+ * @returns the resolved path, or undefined when it cannot be read.
+ */
+function resolvedDirectory(path) {
+  if (typeof path !== 'string' || path.length === 0) return undefined
+  try {
+    return realpathSync(path)
+  } catch {
+    // It does not exist yet: the lexical form still compares correctly, and refusing on
+    // "cannot resolve" would be a fail-closed answer to a question nobody asked.
+    return resolvePath(path)
+  }
+}
+
+/**
+ * Whether a target directory is inside a root.
+ *
+ * Segments, not string prefixes: `/work/app2` must not count as being inside `/work/app`.
+ * Symlinks are resolved first, because a link inside the workspace pointing at / would
+ * otherwise walk straight out of the scope. Windows compares case-insensitively, as its
+ * filesystem does.
+ *
+ * @param target - the directory the command would run in.
+ * @param root - a permitted root.
+ * @returns true when target is root or below it.
+ */
+function isInside(target, root) {
+  const resolvedTarget = resolvedDirectory(target)
+  const resolvedRoot = resolvedDirectory(root)
+  if (resolvedTarget === undefined || resolvedRoot === undefined) return false
+  const fold = (value) => (process.platform === 'win32' ? value.toLowerCase() : value)
+  const targetParts = fold(resolvedTarget).split(/[\\/]+/).filter((part) => part.length > 0)
+  const rootParts = fold(resolvedRoot).split(/[\\/]+/).filter((part) => part.length > 0)
+  if (rootParts.length === 0 || rootParts.length > targetParts.length) return false
+  return rootParts.every((part, index) => part === targetParts[index])
+}
+
+/**
+ * Why this target is out of scope, or undefined when it is allowed.
+ *
+ * @param policy - the live policy.
+ * @param target - the directory git would run in.
+ * @param workspace - the session's workspace, when there is one.
+ * @returns the refusal reason, or undefined.
+ */
+function targetRefusal(policy, target, workspace) {
+  const scope = policy.targetScope ?? DEFAULT_TARGET_SCOPE
+  if (scope === 'unrestricted') return undefined
+  if (scope === 'allowlist') {
+    if (policy.targetPaths.length === 0) {
+      return '「目标范围」是「指定路径」，但一个允许的根目录都没有配置，因此拒绝执行。请在设置里添加根目录，或改用其它模式。'
+    }
+    if (policy.targetPaths.some((root) => isInside(target, root))) return undefined
+    return `目标目录「${target}」不在允许的根目录内（当前允许：${policy.targetPaths.join('、')}）。`
+  }
+  if (workspace !== undefined && isInside(target, workspace)) return undefined
+  return `目标目录「${target}」不在本次会话的工作区内（工作区：${workspace ?? '未知'}）。`
+    + '若确实需要在别处执行，请把设置里的「目标范围」改为「指定路径」或「无限制」。'
+}
+
 function setup(ctx, entry = {}) {
   const base = { ...DEFAULT_CONFIG, ...entry }
   // The HOST-side settings scope is a narrower API than the browser one: it
@@ -1525,6 +1613,21 @@ function setup(ctx, entry = {}) {
         )
       }
       const { verdict, paths, workdir, timeoutMs, justification } = checkArgs(args)
+      /*
+       * The target gate, before anything is audited or approved: there is no point asking
+       * the operator to approve a command that this plugin will not run anywhere.
+       */
+      const sessionWorkspace = exec.agent == null ? undefined : exec.agent.session?.header?.cwd
+      /*
+       * The EFFECTIVE target, not the one the call happened to name: an omitted workdir is
+       * defaulted to the session workspace further along, so judging the raw argument
+       * refused legitimate in-workspace calls for a target of "undefined".
+       */
+      const scopeRefusal = targetRefusal(policy.current, workdir ?? sessionWorkspace, sessionWorkspace)
+      if (scopeRefusal !== undefined) {
+        log.line('git_exec.refused', { reason: 'target-scope', target: workdir })
+        throw new Error(scopeRefusal)
+      }
       const { operation } = verdict
       const name = operation.name
       /*
