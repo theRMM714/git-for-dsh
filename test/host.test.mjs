@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
 import { apply, applyUnguarded, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
+import { retiredKeys } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
 
 /**
@@ -629,6 +630,27 @@ describe('host plugin: the blacklist covers the target directory', () => {
       },
     })
     await assert.doesNotReject(() => definition.execute({ ...CALL, argv: ['status'], workdir: '/blacklisted/repo' }, execution()))
+  })
+})
+
+describe('host plugin: the configuration health', () => {
+  it('reports the keys the current schema no longer declares', () => {
+    // The user layer is what the operator actually wrote, so a key there with no declaration
+    // in this schema is a leftover from a setting this plugin no longer has.
+    const descriptor = (user) => ({ describe: () => [{ ns: 'git-tool', user }] })
+    assert.deepEqual(retiredKeys(descriptor({ pathRules: [], retiredThing: 1 })), ['retiredThing'])
+    assert.deepEqual(retiredKeys(descriptor({ pathRules: [], bashPathMode: 'heuristic' })), [])
+    assert.deepEqual(retiredKeys(descriptor({ a: 1, b: 2 })), ['a', 'b'], 'sorted, so the list is stable')
+  })
+
+  it('reports nothing rather than inventing a fault', () => {
+    // A service that cannot answer is not a broken configuration. The settings service is
+    // optional, so this half must survive without one.
+    const descriptor = (user) => ({ describe: () => [{ ns: 'git-tool', user }] })
+    assert.deepEqual(retiredKeys(descriptor(undefined)), [])
+    assert.deepEqual(retiredKeys(descriptor(null)), [])
+    assert.deepEqual(retiredKeys({}), [], 'no describe to ask')
+    assert.deepEqual(retiredKeys({ describe: () => [] }), [], 'the namespace is not registered')
   })
 })
 
