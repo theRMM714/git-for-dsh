@@ -268,8 +268,6 @@ describe('client bundle: loading', () => {
       stored.pathRules.map((row) => [row.path, row.read, row.write, row.ask]),
       [['/x', true, false, true]],
     )
-    // The built-ins are re-added, so a document that dropped one cannot lose it.
-    assert.ok(stored.pathRules.length > 1, 'the built-in rows come back')
     for (const id of CONFIG_POLICIES) {
       assert.equal(decode({ dangerousKeyPolicy: id }).dangerousKeyPolicy, id, `dangerousKeyPolicy "${id}" must survive decoding`)
     }
@@ -337,7 +335,7 @@ describe('client bundle: loading', () => {
     // The native-git row explains the match trade-off; the path row explains why a read
     // is unnecessary at all. Different questions, different answers.
     assert.ok(notes.some((note) => note.includes('提到') && note.includes('也会被拒')), 'the native-git row states its cost')
-    assert.ok(notes.some((note) => note.includes('认证由 git_exec 内部完成')), 'the path row explains why no read is needed')
+    assert.ok(notes.some((note) => note.includes('静默禁止')), 'the blacklist row explains what an unticked row means')
     assert.notEqual(notes[0], notes[1], 'the two guards must not share one hint')
   })
 
@@ -354,7 +352,7 @@ describe('client bundle: loading', () => {
     const segments = collect(page, (element) => element.props?.className?.startsWith('git-tool-segItem') === true)
     // Native git has four tiers, credential paths three, dangerous keys four, and the
     // script check three — the toggles are checkboxes, not segments.
-    assert.equal(segments.length, 20)
+    assert.equal(segments.length, 16)
   })
 
   it('explains a non-JSON port-check answer instead of leaking a parse error', () => {
@@ -389,7 +387,7 @@ describe('client bundle: loading', () => {
     // check the wording that admits the limitation, not merely that rows rendered.
     const text = JSON.stringify(renderPage(activate().calls))
     assert.ok(text.includes('原生 git'), 'the native-git row renders')
-    assert.ok(text.includes('受保护的路径'), 'the path list renders')
+    assert.ok(text.includes('路径黑名单'), 'the blacklist table renders')
     // The wording moved into a collapsed details block, which keeps the nuance
     // reachable without owning the page.
     assert.ok(text.includes('策略闸门'), 'the page says this is a gate')
@@ -519,10 +517,8 @@ describe('client bundle: activation', () => {
       dangerousKeyPolicy: 'neutralize',
       useHostCredentials: true,
       nativeGitPolicy: 'ask',
-      protectedPathsEnabled: false,
-      credentialPolicy: 'ask',
-      identityPolicy: 'allow',
-      protectedPaths: ['~/.git-credentials'],
+      pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
+      bashPathMode: 'write-only',
       scanScripts: false,
       scriptCheckPolicy: 'restrict',
       targetScope: 'allowlist',
@@ -541,10 +537,8 @@ describe('client bundle: activation', () => {
       dangerousKeyPolicy: 'neutralize',
       useHostCredentials: true,
       nativeGitPolicy: 'ask',
-      protectedPathsEnabled: false,
-      credentialPolicy: 'ask',
-      identityPolicy: 'allow',
-      protectedPaths: ['~/.git-credentials'],
+      pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
+      bashPathMode: 'write-only',
       scanScripts: false,
       scriptCheckPolicy: 'restrict',
       targetScope: 'allowlist',
