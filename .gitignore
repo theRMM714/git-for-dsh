@@ -1,4 +1,6 @@
 node_modules/
+# The null-device verifier builds a scratch repository beside itself when it runs on Windows.
+scripts/scratch/
 # lib/ is COMMITTED on purpose: it is the artifact that installs, and shipping it
 # keeps a git install from needing a build script (pnpm gates those behind a
 # per-commit allowBuilds key). scripts/verify-artifacts.mjs fails when it drifts.
