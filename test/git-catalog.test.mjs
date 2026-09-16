@@ -21,7 +21,7 @@ import {
   createBudget,
   describeCatalog,
   DEFAULT_PROTECTION_ROWS,
-  migrateProtectionRows,
+  resolveProtectionRows,
   mentionsProtectedPath,
   reachesProtectedPath,
   hardenArgv,
@@ -379,45 +379,25 @@ describe('a path mention is judged without refusing ordinary work', () => {
   })
 })
 
-describe('the blacklist carries the old tiers over', () => {
+describe('the blacklist rows come from the stored document or the defaults', () => {
   const rowFor = (rows, path) => rows.find((row) => row.path === path)
 
-  it('turns the credential tier into boxes', () => {
-    assert.deepEqual(
-      rowFor(migrateProtectionRows({ credentialPolicy: 'allow' }), DEFAULT_PROTECTION_ROWS[0].path),
-      { path: DEFAULT_PROTECTION_ROWS[0].path, read: true, write: true, ask: false, builtin: true },
-    )
-    assert.deepEqual(
-      rowFor(migrateProtectionRows({ credentialPolicy: 'ask' }), DEFAULT_PROTECTION_ROWS[0].path),
-      { path: DEFAULT_PROTECTION_ROWS[0].path, read: false, write: false, ask: true, builtin: true },
-    )
-    // The default (deny) and an explicit deny land in the same place: nothing ticked.
-    const denied = rowFor(migrateProtectionRows({ credentialPolicy: 'deny' }), DEFAULT_PROTECTION_ROWS[0].path)
-    assert.deepEqual([denied.read, denied.write, denied.ask], [false, false, false])
+  it('gives the built-in rows, all unticked, when nothing is stored', () => {
+    const rows = resolveProtectionRows({})
+    assert.deepEqual(rows, DEFAULT_PROTECTION_ROWS)
   })
 
-  it('keeps the identity default as ask, and maps allow to both boxes', () => {
-    const identityPath = '~/.gitconfig'
-    assert.equal(rowFor(migrateProtectionRows({}), identityPath).ask, true)
-    const allowed = rowFor(migrateProtectionRows({ identityPolicy: 'allow' }), identityPath)
-    assert.deepEqual([allowed.read, allowed.write, allowed.ask], [true, true, false])
+  it('keeps a stored row exactly as it is', () => {
+    const rows = resolveProtectionRows({ pathRules: [{ path: '/x', read: true, write: false, ask: true }] })
+    const own = rowFor(rows, '/x')
+    assert.deepEqual([own.read, own.write, own.ask, own.builtin], [true, false, true, false])
   })
 
-  it("carries the operator's list over as rows with nothing ticked", () => {
-    // The behaviour change, stated: the old switch cannot be expressed as boxes, so a list
-    // that was off arrives denied rather than unenforced.
-    const rows = migrateProtectionRows({ protectedPaths: ['/home/me/private'], protectedPathsEnabled: false })
-    const own = rowFor(rows, '/home/me/private')
-    assert.deepEqual([own.read, own.write, own.ask, own.builtin], [false, false, false, false])
-  })
-
-  it('never loses a built-in row, and keeps explicit boxes', () => {
-    const rows = migrateProtectionRows({ pathRules: [{ path: '~/.gitconfig', read: true, write: false, ask: true }] })
-    assert.equal(rows.length, DEFAULT_PROTECTION_ROWS.length)
-    const identity = rowFor(rows, '~/.gitconfig')
-    assert.deepEqual([identity.read, identity.write, identity.ask], [true, false, true])
-    for (const path of DEFAULT_PROTECTION_ROWS.map((row) => row.path)) {
-      assert.ok(rowFor(rows, path) !== undefined, path + ' must survive')
+  it('never loses a built-in row', () => {
+    const rows = resolveProtectionRows({ pathRules: [{ path: '/x', read: true, write: false, ask: false }] })
+    assert.equal(rows.length, DEFAULT_PROTECTION_ROWS.length + 1)
+    for (const row of DEFAULT_PROTECTION_ROWS) {
+      assert.deepEqual(rowFor(rows, row.path), row, row.path + ' must survive unchanged')
     }
   })
 })

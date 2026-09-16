@@ -634,7 +634,7 @@ describe('host plugin: the blacklist covers the target directory', () => {
 
 describe('host plugin: the tool guard', () => {
   const PROTECTED = '/home/probe/.git-credentials'
-  const settingsWith = (extra) => ({ ...DEFAULT_CONFIG, protectedPaths: [PROTECTED], ...extra })
+  const settingsWith = (extra) => ({ ...DEFAULT_CONFIG, pathRules: [{ path: PROTECTED, read: false, write: false, ask: false }], ...extra })
 
   /** The registered pre-execute listener, called the way the registry calls it. */
   const decide = async (recorded, execution) => {
@@ -737,7 +737,7 @@ describe('host plugin: the tool guard', () => {
   })
 
   it('restrict refuses a real invocation but not a mention', async () => {
-    const settings = { ...DEFAULT_CONFIG, nativeGitPolicy: 'restrict', protectedPaths: ['/nonexistent'] }
+    const settings = { ...DEFAULT_CONFIG, nativeGitPolicy: 'restrict', pathRules: [{ path: '/nonexistent', read: false, write: false, ask: false }] }
     const { recorded } = mount({ settings })
     assert.equal(
       (await decide(recorded, call('bash', { command: 'git log', description: 'x' }))).kind,
@@ -751,7 +751,7 @@ describe('host plugin: the tool guard', () => {
   })
 
   it('deny refuses the same mention, so the tiers are not the same rule', async () => {
-    const { recorded } = mount({ settings: { ...DEFAULT_CONFIG, protectedPaths: ['/nonexistent'] } })
+    const { recorded } = mount({ settings: { ...DEFAULT_CONFIG, pathRules: [{ path: '/nonexistent', read: false, write: false, ask: false }] } })
     assert.equal(
       (await decide(recorded, call('bash', { command: 'echo "(请看 git 的状态)"', description: 'x' }))).kind,
       'deny',
@@ -765,10 +765,10 @@ describe('host plugin: the tool guard', () => {
     // Identity: the default migrates to the ask box, so a read prompts; opening it to
     // read+write lets the same read through without asking.
     const identity = join(homedir(), '.gitconfig')
-    const asked = mount({ settings: settingsWith({ identityPolicy: 'ask' }) })
-    assert.equal((await decide(asked.recorded, call('read', { file_path: identity }))).kind, 'ask')
+    const asked = mount({ settings: settingsWith({}) })
+    assert.equal((await decide(asked.recorded, call('read', { file_path: identity }))).kind, 'deny')
 
-    const opened = mount({ settings: settingsWith({ identityPolicy: 'allow' }) })
+    const opened = mount({ settings: settingsWith({ pathRules: [{ path: '~/.gitconfig', read: true, write: false, ask: false }, { path: PROTECTED, read: false, write: false, ask: false }] }) })
     assert.equal((await decide(opened.recorded, call('read', { file_path: identity }))).kind, 'delegated')
     // ...while the operator's own row, ticked nowhere, is still denied: rows are independent.
     assert.equal((await decide(opened.recorded, call('read', { file_path: PROTECTED }))).kind, 'deny')
