@@ -518,6 +518,12 @@ describe('enforced configuration pins the program-naming keys', () => {
     assert.equal(ENFORCED_CONFIG.some((pair) => pair.key === 'core.sshCommand'), false)
     // A blank setting falls back rather than pinning an empty program.
     assert.match(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, /^\/usr\/bin\/ssh -o BatchMode=yes/)
+    // A path the shell would otherwise reinterpret must reach git as written: inside double
+    // quotes a $ or a backtick is still expanded, which is why the shared rule single-quotes.
+    assert.match(
+      buildEnv({ sshCommand: '/opt/ssh$weird/bin/ssh' }).GIT_SSH_COMMAND,
+      /^'\/opt\/ssh\$weird\/bin\/ssh' -o BatchMode=yes/,
+    )
   })
 })
 
