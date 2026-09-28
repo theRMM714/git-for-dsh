@@ -64,6 +64,7 @@ import {
 } from './git-catalog.js'
 import { probePort, proxyEnvironment, waitForPort } from './proxy.js'
 import { createDiagnosticLog, defaultLogPath } from './log.js'
+import { ROUTES } from './routes.js'
 import { accessSync, constants, readdirSync, realpathSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -777,7 +778,7 @@ async function ensureProxy(ctx, state, policy, signal) {
     if (state.mode === 'started' && state.process !== undefined) state.process.kill()
     state.mode = undefined
     state.process = undefined
-  }, 'git-tool: proxy process')
+  }, 'tool-git: proxy process')
 
   if (!(await waitForPort(host, port, 8000, signal))) {
     process.kill()
@@ -805,9 +806,6 @@ async function ensureProxy(ctx, state, policy, signal) {
  */
 const COMMON_PROXY_PORTS = Object.freeze([7890, 7897, 7891, 10808, 10809, 1080, 8889, 8080, 20171])
 
-/** The route the settings page asks for a port verdict. */
-const PROXY_CHECK_PATH = '/git-tool/proxy-check'
-
 /** Whether the harness itself runs on Windows, rather than in WSL on Linux. */
 const IS_WINDOWS = process.platform === 'win32'
 
@@ -828,11 +826,8 @@ const WINDOWS_NATIVE_CANDIDATES = Object.freeze([
   'C:\\Program Files\\Git\\usr\\bin\\ssh.exe',
 ])
 
-/** The route the settings page reads the configuration health through, and resets it. */
-const CONFIG_CHECK_PATH = '/git-tool/config-check'
 
 /** The route the settings page asks which ssh programs exist. */
-const SSH_CHECK_PATH = '/git-tool/ssh-check'
 
 /**
  * Where an ssh is worth looking for, beyond whatever `$PATH` already holds.
@@ -1012,8 +1007,6 @@ function sshCandidateScan() {
   }
 }
 
-/** The route the settings page reads and clears the diagnostic log through. */
-const LOG_PATH = '/git-tool/log'
 
 /** How much of the log the page may read, and how many lines it shows. */
 const LOG_TAIL_BYTES = 256 * 1024
@@ -1604,7 +1597,7 @@ function setup(ctx, config = {}) {
     ctx.inject(['webServer'], (webCtx) => {
       webCtx.effect(() => webCtx.webServer.register({
         kind: 'exact',
-        path: PROXY_CHECK_PATH,
+        path: ROUTES.proxyCheck,
         handler: async (req, res) => {
           /** One JSON response, with the headers a fetch from the page needs. */
           const respond = (payload, status = 200) => {
@@ -1634,7 +1627,7 @@ function setup(ctx, config = {}) {
        */
       webCtx.effect(() => webCtx.webServer.register({
         kind: 'exact',
-        path: LOG_PATH,
+        path: ROUTES.log,
         handler: async (req, res) => {
           /** One JSON response, with the headers a fetch from the page needs. */
           const respond = (payload, status = 200) => {
@@ -1709,7 +1702,7 @@ function setup(ctx, config = {}) {
        */
       webCtx.effect(() => webCtx.webServer.register({
         kind: 'exact',
-        path: CONFIG_CHECK_PATH,
+        path: ROUTES.configCheck,
         handler: async (req, res) => {
           const respond = (payload, status = 200) => {
             res.statusCode = status
@@ -1736,7 +1729,7 @@ function setup(ctx, config = {}) {
   
       webCtx.effect(() => webCtx.webServer.register({
         kind: 'exact',
-        path: SSH_CHECK_PATH,
+        path: ROUTES.sshCheck,
         handler: (req, res) => {
           const respond = (payload, status = 200) => {
             res.statusCode = status
@@ -1922,7 +1915,7 @@ function setup(ctx, config = {}) {
       // session. The trade-off is that a BROKEN guard looks like a permissive one, so
       // the unit tests drive this listener directly — that is what catches a guard
       // that has stopped judging.
-      ctx.logger?.warn?.(`git-tool: the tool guard failed: ${error instanceof Error ? error.message : String(error)}`)
+      ctx.logger?.warn?.(`tool-git: the tool guard failed: ${error instanceof Error ? error.message : String(error)}`)
       // The failure is the guard's, not the command's, and the message says so: the operator is
       // being asked about a defect, which is what makes a broken guard visible.
       const failure = guardFailureVerdict(policy.current.guardErrorPolicy ?? DEFAULT_GUARD_ERROR_POLICY, error)

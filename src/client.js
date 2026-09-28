@@ -63,7 +63,7 @@ window.__ModuleLoader__.load({
       /**
        * The operation catalog and the default allowlist, embedded by the build
        * from `src/git-catalog.js` — the same source the Host enforces. Shape:
-       * `{ catalog: [{ risk, title, hint, groups: [{ group, operations: [...] }] }], defaults }`.
+       * `{ catalog: [...], routes, defaults }`.
        */
       const CATALOG = __GIT_TOOL_CATALOG__
 
@@ -136,8 +136,6 @@ window.__ModuleLoader__.load({
        * obfuscated form). The operator picks which error they prefer.
        */
       /** A built-in row, reset to the defaults this build ships. */
-      /** The same-origin route that reports the configuration health and resets it. */
-      const CONFIG_CHECK_ROUTE = '/git-tool/config-check'
 
       const builtinRows = (rows) => (rows ?? []).map((row) => ({ ...row, builtin: true }))
 
@@ -485,7 +483,7 @@ window.__ModuleLoader__.load({
         // way — so relying on it, or on `ctx.get('styles')` (which answers
         // undefined because it is not a service), is what shipped a completely
         // unstyled page. A tag this bundle inserts itself works either way.
-        ctx.effect(() => insertStyles(), 'git-tool: settings styles')
+        ctx.effect(() => insertStyles(), 'tool-git: settings styles')
 
         // Declared in `inject`, so this resolves before apply runs. The lookup
         // and the inert fallback are kept as a net: they should be unreachable,
@@ -535,7 +533,7 @@ window.__ModuleLoader__.load({
           const probeSsh = () => {
             setSshProbe({ state: 'loading' })
             Promise.resolve()
-              .then(() => fetch('/git-tool/ssh-check', { headers: { accept: 'application/json' } }))
+              .then(() => fetch(CATALOG.routes.sshCheck, { headers: { accept: 'application/json' } }))
               .then((response) => response.text().then((text) => classifyJsonResponse(
                 response.status,
                 text,
@@ -557,7 +555,7 @@ window.__ModuleLoader__.load({
             setLogView({ state: 'loading' })
             const query = action === 'clear' ? '?action=clear' : '?tail=300'
             Promise.resolve()
-              .then(() => fetch('/git-tool/log' + query, { headers: { accept: 'application/json' } }))
+              .then(() => fetch(CATALOG.routes.log + query, { headers: { accept: 'application/json' } }))
               .then((response) => response.text().then((text) => classifyJsonResponse(
                 response.status,
                 text,
@@ -578,7 +576,7 @@ window.__ModuleLoader__.load({
             const parsed = Number.parseInt(String(proxyDraft.proxyPort ?? value.proxyPort ?? 0), 10)
             setPortCheck({ state: 'loading' })
             Promise.resolve()
-              .then(() => fetch('/git-tool/proxy-check?port=' + String(Number.isInteger(parsed) ? parsed : 0), {
+              .then(() => fetch(CATALOG.routes.proxyCheck + '?port=' + String(Number.isInteger(parsed) ? parsed : 0), {
                 headers: { accept: 'application/json' },
               }))
               /*
@@ -654,7 +652,7 @@ window.__ModuleLoader__.load({
 
       /** Ask the Host which keys the current schema no longer knows. */
       const checkConfiguration = () => {
-        fetch(CONFIG_CHECK_ROUTE, { headers: { accept: 'application/json' } })
+        fetch(CATALOG.routes.configCheck, { headers: { accept: 'application/json' } })
           .then((response) => response.json())
           .then((payload) => setConfigHealth({
             retired: Array.isArray(payload.retired) ? payload.retired.filter((key) => typeof key === 'string') : [],
@@ -676,7 +674,7 @@ window.__ModuleLoader__.load({
           setConfigHealth({ retired: [], error: '当前设置来源不可写，无法初始化；请让插件以可写来源加载。' })
           return
         }
-        fetch(CONFIG_CHECK_ROUTE, { method: 'POST', headers: { accept: 'application/json' } })
+        fetch(CATALOG.routes.configCheck, { method: 'POST', headers: { accept: 'application/json' } })
           .then((response) => response.json())
           .then((payload) => {
             if (typeof payload.error === 'string') setConfigHealth({ retired: [], error: payload.error })
@@ -1316,7 +1314,7 @@ window.__ModuleLoader__.load({
                   defaultValue: value.logPath ?? '',
                   onBlur: (event) => writePolicy('logPath', event.target.value),
                 }),
-                (value.logPath ?? '').length > 0 ? '当前：' + value.logPath : '当前：默认（$DSH_HOME/git-for-dsh.log）',
+                (value.logPath ?? '').length > 0 ? '当前：' + value.logPath : '当前：默认（$DSH_HOME/tool-git.log）',
               ),
               React.createElement(
                 'div',

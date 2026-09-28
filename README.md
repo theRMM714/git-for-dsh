@@ -338,7 +338,7 @@ git pull --ff-only origin main
 | 仓库配置审计 | 出现危险配置键时 | 一票拒绝 | 一票拒绝 / 只拒受影响 / 尽量中和 / 关闭审计 |
 | 诊断日志 | 写诊断日志 | 开 | 每次闸门判定记一行（含耗时） |
 | 诊断日志 | 心跳行 | 关 | 每 5 秒一行，报出卡在半途的调用及其时长 |
-| 诊断日志 | 日志路径 | 空 | 留空使用 `$DSH_HOME/git-for-dsh.log` |
+| 诊断日志 | 日志路径 | 空 | 留空使用 `$DSH_HOME/tool-git.log` |
 
 ### SSH：程序路径可以探测，不用自己填
 
@@ -352,10 +352,10 @@ git pull --ff-only origin main
 
 ### 诊断日志
 
-默认开启，写在 `$DSH_HOME/git-for-dsh.log`（设置页可改路径或关掉）。在终端里盯着它：
+默认开启，写在 `$DSH_HOME/tool-git.log`（设置页可改路径或关掉）。在终端里盯着它：
 
 ```sh
-tail -f ~/.dsh/git-for-dsh.log
+tail -f ~/.dsh/tool-git.log
 ```
 
 记什么：
@@ -440,7 +440,7 @@ Host 半默认对 `write` 与 `remote` 档位的每一次调用弹出审批，�
 
 **两层兜底**（都在代码里，不依赖用户记得用上面的开关）：
 
-- Host 半的 `apply()` 把整段初始化包在 try/catch 里。初始化失败只在日志留下一行带原因的 `git-tool: activation failed …`，`git_exec` 不注册，会话照常可用。
+- Host 半的 `apply()` 把整段初始化包在 try/catch 里。初始化失败只在日志留下一行带原因的 `tool-git: activation failed …`，`git_exec` 不注册，会话照常可用。
 - Client 半导出 `inject: ['slots', 'settingsScope']`（这是让激活等待服务就绪的机制），服务确实缺失时用 `ctx.get()` 可选读取并降级成不可写页面；**整个工厂体包在 try/catch 里**，求值失败就交出一个空操作的插件，而不是让这次插件加载失败。页面本身还套了 React error boundary。
 
 ## 开发
@@ -468,7 +468,7 @@ node scripts/render-preview.mjs                 # 生成 .preview.html
 DSH_SHELL_CSS=<shell 的 index-*.css> node scripts/render-preview.mjs   # 带上真实主题色
 ```
 
-它用**构建产物里那个页面组件**渲染出真实 DOM，再套上 shell 的样式表，因此看到的就是页面长什么样，不需要登录、不需要浏览器会话。仓库里的 `git-tool-settings-preview.html` 是它的输出。
+它用**构建产物里那个页面组件**渲染出真实 DOM，再套上 shell 的样式表，因此看到的就是页面长什么样，不需要登录、不需要浏览器会话。输出默认写到仓库根目录的 `.preview.html`（已被 `.gitignore` 忽略，不入库）。
 
 ## 延伸阅读
 
