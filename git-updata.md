@@ -124,7 +124,7 @@ const readPolicy = () => {
 | --- | --- | --- | --- |
 | 0 | 基线与准备 | 基线记录、本文件 | ☐ |
 | 1 | 宿主半适配 | 设置层 + 条目标识 + 4 条路由 | ✔ 已完成 |
-| 2 | 客户端半迁移 | `configForms` 绑定 | ☐ |
+| 2 | 客户端半迁移 | `configForms` 绑定 | ✔ 已完成 |
 | 3 | 真机验收 | V1–V7 实测 | ☐ |
 | 4 | 缺陷审计与清理 | §七 的 G 组 | ☐ |
 | 5 | 文档同步与销账 | 三份文档定稿、删除本文件 | ☐ |
@@ -180,15 +180,26 @@ const readPolicy = () => {
 
 ### 阶段 2 · 客户端半
 
-- [ ] `inject` 改为 `['slots','configForms']`
-- [ ] `NAMESPACE` 改为 `tool-git`
-- [ ] 绑定改为 `ctx.configForms.get('tool-git')`，注册包进 `whileServed(['tool-git'], publish)`
-- [ ] `inertScope` 保留为降级分支，原因文案改为 `configForms`
-- [ ] 核对客户端引用的 4 条路由路径与宿主一致（若路由路径改名需同步）
-- [ ] `test/client.test.mjs` 同步 + 新增「宿主未提供该条目时不得注册」门控
-- [ ] **J3 必须同批修**：`scripts/verify-served-bundle.mjs:83-85` 断言 `inject` 含 `settingsScope`，不改会挡住构建
-- [ ] **J1 必须同批修**：`decodeSection` 漏 `guardErrorPolicy`，而 `:1072` 读它
-- [ ] 构建 + 测试全绿（**在 WSL 内**）
+- [x] `inject` 改为 `['slots','configForms']`；`NAMESPACE` 改为 `tool-git`
+- [x] 绑定改为 `ctx.configForms.get(NAMESPACE)`，注册包进 `whileServed([NAMESPACE], publish)`
+- [x] `inertScope` 保留为降级分支，原因文案改为 `configForms`
+- [x] **J1**：抽出 `fallbackSection()`，两个分支改为「先铺 fallback 再覆盖」，`guardErrorPolicy` 补进 fallback **与**校验分支
+- [x] **J2/J15**：`build.mjs` 的 `defaults` 补 `guardErrorPolicy`，并新增**防漂移测试**（`Config` 每个字段都必须有嵌入默认值）
+- [x] **J3**：`verify-served-bundle.mjs` 的 `inject` 断言、裸读清单、假 service、场景列表与断言全部迁移
+- [x] **J4**：客户端 `NAMESPACE` 与 slot id 统一为 `tool-git`
+- [x] **J6**：`segmented` 的四个 tier 键对齐宿主的 `tierIds` 键（`guardError/nativeGit/scriptCheck/config`）
+- [x] **J7/J8**：删除死表 `GUARD_COPY`/`PATH_COPY`；取消未被引用的 `exports.message`/`exports.inertScope`，改为导出 `decodeSection` 供测试
+- [x] `test/client.test.mjs` 同步；`decodeSection` 的用例改为直接调用导出
+- [x] 构建 + 测试全绿 → **226/226（WSL 内）**，`build --check` 通过，**verify 26/26 通过**
+
+**未做（留阶段 4）**
+- 路由路径改名（`/git-tool/*` → `/tool-git/*`）需客户端与宿主同改，另行决定（J5）
+- UI 结构与样式一行未动（符合既定约定）
+
+**阶段 2 证据**
+- `verify-served-bundle.mjs`：26/26 检查通过（含 `declares slots and configForms`、`requests the tool-git form`）
+- 防漂移测试**当场抓到一处真实不一致**（`pathRules` 在嵌入目录里叫 `protectionRows`）——确认为**有意的投影**后在测试里写明映射，而不是掩盖
+- 客户端不再出现 `settingsScope`
 
 ### 阶段 3 · 真机验收
 
@@ -256,21 +267,21 @@ const readPolicy = () => {
 
 | # | 位置 | 问题 | 严重度 | 归属阶段 |
 | --- | --- | --- | --- | --- |
-| J1 | `src/client.js:367-441` | `decodeSection` 两个分支各写一遍完整字段表，且**都漏 `guardErrorPolicy`**，而 `:1072` 会读它 → 存过 `allow` 的 profile 刷新后显示 `ask` | 高 | **阶段 2** |
-| J2 | `scripts/build.mjs:130-167` | 嵌入浏览器的 `defaults` **手工重述**宿主默认值，已与 schema 漂移（缺 `guardErrorPolicy`），且无测试比对 | 高 | 阶段 4 |
-| J3 | `scripts/verify-served-bundle.mjs:12-13, 83-85` | 头注释声称「exports `apply` and NO `inject`」已失效；脚本实际断言 `inject` 含 `slots/settingsScope` → **阶段 2 改完必然挡住构建** | 高 | **阶段 2** |
-| J4 | `src/client.js:263,1412,495,1547` | 客户端仍用 `'git-tool'`，与宿主 `'tool-git'` 不一致 | 高 | **阶段 2** |
+| J1 | `src/client.js` `decodeSection` | 两分支都漏 `guardErrorPolicy`，而渲染处会读它 → 存过 `allow` 的 profile 刷新后显示 `ask`。已抽 `fallbackSection()` 并补校验分支，测试改为回归守护 | 高 | ✔ 已修（阶段 2） |
+| J2 | `scripts/build.mjs` `serializeCatalog` | 嵌入浏览器的 `defaults` 手工重述宿主默认值，已与 schema 漂移（缺 `guardErrorPolicy`） | 高 | ✔ 已修（阶段 2） |
+| J3 | `scripts/verify-served-bundle.mjs` | 断言 `inject` 含 `settingsScope`，阶段 2 改完必然失败。已迁移断言、裸读清单、假 service 与全部场景 | 高 | ✔ 已修（阶段 2） |
+| J4 | `src/client.js` | 客户端 `NAMESPACE` 与 slot id 仍用 `'git-tool'` | 高 | ✔ 已修（阶段 2） |
 | J5 | `client.js:545,567,588` vs `index.js:839,862,865,1046` | 4 条路由路径客户端**硬编码**、宿主另有常量、测试再硬编码一遍（**三份**） | 中 | 阶段 4 |
-| J6 | `client.js:129` vs `:787` | `tierIds` 两种键：`isKnownTier` 用 `'nativeGit'/'config'/'scriptCheck'`，`tiersFor` 用字段名 → 分段顺序实际退回客户端副本 | 中 | 阶段 4 |
-| J7 | `client.js:131-135, 232-236` | `GUARD_COPY`、`PATH_COPY` 无任何读取点 | 低 | 阶段 4 |
-| J8 | `client.js:1539-1540` | `exports.message` / `exports.inertScope` 无外部调用方 | 低 | 阶段 4 |
+| J6 | `client.js` `segmented` 调用 | 四个 tier 键用了字段名而非宿主的 `tierIds` 键，分段顺序退回客户端副本 | 中 | ✔ 已修（阶段 2） |
+| J7 | `client.js` | `GUARD_COPY`、`PATH_COPY` 无任何读取点 | 低 | ✔ 已删（阶段 2） |
+| J8 | `client.js` 导出块 | `exports.message` / `exports.inertScope` 无外部调用方。已取消导出，改为导出测试所需的 `decodeSection` | 低 | ✔ 已修（阶段 2） |
 | J9 | `client.js:382,415` | `scanScripts` 被解码但页面从不渲染/写入 | 低 | 仅记录 |
 | J10 | `client.js:669-699` | config-check 两条请求用 `response.json()` 并吞掉真实错误（统一报「无法连接宿主」），与 `classifyJsonResponse` 的其余用法不一致 | 中 | 阶段 4 |
 | J11 | `client.js:1159,1165` vs `index.js:855,858,889-892` | Windows ssh 路径知识**写三份** | 中 | 阶段 4 |
 | J12 | `client.js:637-642` | `writePolicy` 的文档注释孤立在 `addPendingPath` 上方 | 低 | 阶段 4 |
 | J13 | `scripts/render-preview.mjs:28-37` | React 桩缺 `useMemo`，而 `client.js:623-628` 会调用 → **预览校验已失效** | 中 | 阶段 4 |
 | J14 | `test/client.test.mjs:95,164,201,209-214` | 未使用的桩与 recorder 字段；`styles`/`react/jsx-runtime` 从不被 require | 低 | 阶段 4 |
-| J15 | `scripts/build.mjs:130-177` | 嵌入的 catalog/defaults 与宿主 schema 无漂移测试（与 J2 同源） | 高 | 阶段 4 |
+| J15 | `scripts/build.mjs` | 嵌入的 catalog/defaults 与宿主 schema 无漂移测试。已新增：`Config` 每个字段都必须有嵌入默认值（写明 `pathRules → protectionRows` 这处有意投影） | 高 | ✔ 已修（阶段 2） |
 
 > 宿主半（`src/index.js`、`src/git-catalog.js`）的独立审计已完成，发现见下方 K 组。
 ### K 组 · 代码审计发现（`src/index.js` / `src/git-catalog.js`，只读审计，已逐条复核）
