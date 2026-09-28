@@ -293,7 +293,7 @@ const readPolicy = () => {
 | J9 | `client.js` | `scanScripts` 被解码但页面从不渲染/写入。**迁移删除后该字段整体消失** | 低 | ✔ 已删（阶段 4） |
 | J10 | `client.js:669-699` | config-check 两条请求用 `response.json()` 并吞掉真实错误（统一报「无法连接宿主」），与 `classifyJsonResponse` 的其余用法不一致 | 中 | 阶段 4 |
 | J11 | `client.js:1159,1165` vs `index.js:855,858,889-892` | Windows ssh 路径知识**写三份** | 中 | 阶段 4 |
-| J12 | `client.js:637-642` | `writePolicy` 的文档注释孤立在 `addPendingPath` 上方 | 低 | 阶段 4 |
+| J12 | `client.js` | `writePolicy` 的文档注释孤立在 `addPendingPath` 上方，其定义处无注释且缩进有残留 | 低 | ✔ 已修（阶段 4） |
 | J13 | `scripts/render-preview.mjs:28-37` | React 桩缺 `useMemo`，而 `client.js:623-628` 会调用 → **预览校验已失效** | 中 | 阶段 4 |
 | J14 | `test/client.test.mjs:95,164,201,209-214` | 未使用的桩与 recorder 字段；`styles`/`react/jsx-runtime` 从不被 require | 低 | 阶段 4 |
 | J15 | `scripts/build.mjs` | 嵌入的 catalog/defaults 与宿主 schema 无漂移测试。已新增：`Config` 每个字段都必须有嵌入默认值（写明 `pathRules → protectionRows` 这处有意投影） | 高 | ✔ 已修（阶段 2） |
@@ -306,20 +306,20 @@ const readPolicy = () => {
 | --- | --- | --- | --- | --- |
 | K1 | `index.js` 守卫 catch | `guardFailureVerdict(current.…)` 里 `current` 未定义。守卫抛错时 catch 自身再抛 `ReferenceError` 逃出监听器——正是该处注释声称要避免的"拖垮每次调用"。已改 `policy.current`，并新增**驱动监听器**的用例（反向验证：把 bug 放回去，该用例即以 `ReferenceError: current is not defined` 失败） | **高** | ✔ 已修（阶段 4） |
 | K2 | `index.js` 基名提取 | 用 `split('/')` 取基名，而 `absoluteProtectedPath` 返回**原生平台路径**（Windows 为反斜杠）→ Windows 上基名恒等于整条路径、`protectedNames` 恒不命中，`realpathSync` 的符号链接回退**永不执行**（凭据文件漏判）。已抽出 `git-catalog.lastPathSegment`（按 `/[\\/]+/` 切分）并在三处使用，配跨分隔符单测 | **高** | ✔ 已修（阶段 4） |
-| K3 | `index.js:2348` | 整行 re-export 无任何导入者（各测试都直接 import `git-catalog.js`） | 低 | 阶段 4 |
+| K3 | `index.js` 末尾 re-export | 整行无任何导入者（各测试都直接 import `git-catalog.js`） | 低 | ✔ 已删（阶段 4） |
 | K4 | `git-catalog.js` `resolveProtectionRows` | `if`/`else` 两分支返回同一表达式（那个判断只为区分迁移形状） | 低 | ✔ 已删（阶段 4，随迁移删除一并拍平） |
-| K5 | `git-catalog.js:426` | `FORBIDDEN_DASH_C` 只在注释里被引用，真正拦截在 `FORBIDDEN_GLOBAL:395` 与 `FORBIDDEN_GLOBAL_PREFIXES:414` | 低 | 阶段 4 |
-| K6 | `index.js:47, 37` | `DEFAULT_PROTECTION_ROWS` / `GUARD_POLICIES` 导入后未作值使用 | 低 | 阶段 4 |
-| K7 | `git-catalog.js:709` | `refuseMutation: true` 全仓无读取 | 低 | 阶段 4 |
-| K8 | `index.js:1343` | `typeof text === 'string'` 恒真（1336 已保证） | 低 | 阶段 4 |
-| K9 | `index.js`、`git-catalog.js:154-155` | `scanScripts` 旧布尔/迁移/日志字段已无渲染点。**迁移整体删除后该项消失**；剩下第二个 read 分组的 title/hint 仍未渲染，留待第二批 | 低 | 部分已删（阶段 4） |
+| K5 | `git-catalog.js` | `FORBIDDEN_DASH_C` 只在注释里被引用，真正拦截在 `FORBIDDEN_GLOBAL` 与前缀表 | 低 | ✔ 已删（阶段 4） |
+| K6 | `index.js` 导入 | `DEFAULT_PROTECTION_ROWS` / `GUARD_POLICIES` 导入后未作值使用 | 低 | ✔ 已删（阶段 4） |
+| K7 | `git-catalog.js` | `refuseMutation: true` 全仓无读取 | 低 | ✔ 已删（阶段 4） |
+| K8 | `index.js` 脚本检查 | `typeof text === 'string'` 恒真（进入前已保证是字符串） | 低 | ✔ 已删（阶段 4） |
+| K9 | `index.js`、`git-catalog.js` | `scanScripts` 系列已随迁移删除；第二个 read 分组的 `title`/`hint` 也已删（`describeCatalog` 只取每个档位第一个分组的标题，其余分组只保留 `group` 与 `operations`） | 低 | ✔ 已删（阶段 4） |
 | K10 | `index.js:621-630, 660-664, 679-688, 733-737, 999-1003, 1096-1116, 1406-1416, 1610-1616, 1720-1723`；`git-catalog.js:479-484, 515-520, 1011-1020` | **无后继声明的孤儿 JSDoc**（与 G19 同源） | 中 | 阶段 4 |
-| K11 | `git-catalog.js` / `index.js` | 零外部引用的导出：`isCredentialUrl` / `RISK_ORDER` / `FORBIDDEN_GLOBAL` / `BASE_ENV` / `SCAN_BUDGET` / `unboundedSteps`；`shellQuote` 与 `applyUnguarded` 仅测试引用 | 低 | 阶段 4（降内部 / 仅记录） |
+| K11 | `git-catalog.js` / `index.js` | 六个导出**并非无人使用，而是只在自身模块内使用** → 去掉 `export` 降为内部；`shellQuote` 与 `applyUnguarded` 有测试引用，保留导出并注明 | 低 | ✔ 已处置（阶段 4） |
 | K12 | `git-catalog.js:1110` vs `1123` | 同一"git 词"判定写两份，切分 `/[\\/]/` 与 `'/'` 不一致 | 中 | 阶段 4 |
-| K13 | `git-catalog.js:654-664` | `operands > maxOperands` 判两遍 | 低 | 阶段 4 |
-| K14 | `index.js:1087` vs `1219`（及 `:1373,1375`） | `~/` 展开 + `resolvePath` 重复实现；循环内重复 `operands.join(' ')` | 低 | 阶段 4 |
-| K15 | `git-catalog.js:1451` | `refuse()` 返回的 `affects` 无消费者 | 低 | 阶段 4 |
-| K16 | `git-catalog.js:1202, 1459` | 注释与签名不符：`@param before` 实为 `(command, at)`；`shellQuote` 写 `/bin/sh` 却有 pwsh 方言 | 低 | 阶段 4 |
+| K13 | `git-catalog.js` 操作数上限 | **审计结论有误，不改**：两个分支各自可达且文案不同——`config` 同时有 `forbiddenFlags` 与 `maxOperands`（走第一条），`remote` 只有 `maxOperands`（走第二条）。合并会改变用户看到的拒绝文案 | 低 | ✔ 不改（有理由） |
+| K14 | `index.js` | `~/` 展开重复实现 → 已抽出 `expandTilde` 并两处复用。循环内重复 `operands.join(' ')` **未做**，转第二批遗留 | 低 | 部分已修（阶段 4） |
+| K15 | `git-catalog.js` `refuse()` | 返回的 `key` / `affects` 均无消费者（`reason` 已含键名，测试也不读） | 低 | ✔ 已删（阶段 4） |
+| K16 | `git-catalog.js` | 注释与签名不符：`@param before` 实为 `(command, at)`；`shellQuote` 写 `/bin/sh` 却有 pwsh 方言 | 低 | ✔ 已改（阶段 4） |
 
 **审计结论（两份报告共同确认）**
 - **未发现 import 环**：`index → {git-catalog, proxy, log}`；`client.js` 只在运行时 `require` 页面模块。
