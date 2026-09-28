@@ -26,6 +26,7 @@ import {
   reachesProtectedPath,
   hardenArgv,
   invokesGit,
+  lastPathSegment,
   shellQuote,
   validateArgv,
 } from '../src/git-catalog.js'
@@ -701,5 +702,20 @@ describe('command composition', () => {
   it('composes an argv that survives spaces and glob characters', () => {
     assert.equal(composeCommand(['add', '--', 'a b.js']), `git add -- 'a b.js'`)
     assert.equal(composeCommand(['log', '-n', '5']), 'git log -n 5')
+  })
+})
+
+describe('lastPathSegment', () => {
+  it('reads the final segment of a path in either dialect', () => {
+    // The rule this protects: a protected path is matched by BASENAME, and on Windows the
+    // resolved path arrives with backslashes. Splitting on '/' alone returned the WHOLE path
+    // there, so the name never matched and the symlink fallback never ran.
+    assert.equal(lastPathSegment('/home/me/.ssh/id_rsa'), 'id_rsa')
+    assert.equal(lastPathSegment('C:\\Users\\me\\.ssh\\id_rsa'), 'id_rsa')
+    assert.equal(lastPathSegment('C:/Users/me/.ssh/id_rsa'), 'id_rsa')
+    assert.equal(lastPathSegment('\\\\server\\share\\file'), 'file')
+    assert.equal(lastPathSegment('/home/me/.ssh/'), '.ssh', 'a trailing separator does not yield an empty name')
+    assert.equal(lastPathSegment(''), '')
+    assert.equal(lastPathSegment('/'), '')
   })
 })
