@@ -26,7 +26,7 @@ git-for-dsh
 failed to apply loader entry 199c02e5 (git-for-dsh): cannot get property "slots" without inject
 ```
 
-**根因**：模块导出的是 `inject: ['settingsScope', ...]`，而代码里读了 `ctx.slots`。Cordis Guard 对**未声明的服务属性读取**直接抛错，而 `apply` 在页面启动流程里执行 → 整个插件加载失败。
+**根因**：模块导出的 `inject` 里**漏了代码实际读取的那个服务**（声明的是设置域服务，代码却读了 `ctx.slots`）。Cordis Guard 对**未声明的服务属性读取**直接抛错，而 `apply` 在页面启动流程里执行 → 整个插件加载失败。
 
 ### 第二错（更隐蔽）：把声明整个删掉 → 设置页永久只读
 
@@ -35,8 +35,8 @@ failed to apply loader entry 199c02e5 (git-for-dsh): cannot get property "slots"
 **根因**：我据此推断"任何声明都会让包被永久 parked"，于是**删掉了整个 `exports.inject`**，全部改用 `ctx.get`。`ctx.get` 确实不会触发 Guard、也确实能优雅降级 —— 但它**同时丢掉了顺序保证**：
 
 ```text
-apply 可能在 @deepseek-ai/dsh-client-ui-settings 注册 settingsScope 之前执行
-  → ctx.get('settingsScope') 返回 undefined
+apply 可能在客户端设置域注册 configForms 之前执行
+  → ctx.get('configForms') 返回 undefined
   → 页面退化成 inert scope
   → 控件全部禁用（表现为"禁止用户修改配置"）
 ```
@@ -51,7 +51,7 @@ apply 可能在 @deepseek-ai/dsh-client-ui-settings 注册 settingsScope 之前�
 
 ### 谁守着（这次刻意写死了）
 
-- `test/client.test.mjs` 断言 `exports.inject` **恰好等于** `['slots', 'settingsScope']`；
+- `test/client.test.mjs` 断言 `exports.inject` **恰好等于** `['slots', 'configForms']`；
 - `scripts/verify-served-bundle.mjs` 断言声明覆盖实际读取的服务。
 
 **注意这两条断言原来写的是反的** —— 它们要求 `inject` **不存在**，等于把 bug 焊死。*断言也可能在表达错误的设计；修 bug 时要一并修断言。*

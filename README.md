@@ -17,16 +17,18 @@
 
 ### 在 Windows 上还有一条更硬的理由
 
-dsh 自带的交互式 bash 工具在 Windows 上基本起不来，报错通常是 `PTY shell exited during startup` 或 `terminal inspection is unsupported on platform win32`。原因有三层，都在 dsh 代码里可以查到：
+dsh 的交互式 bash 工具依赖两条在 Windows 上并不存在的路径，报错原文就在 dsh 自己代码里：
 
 - **进程检查器只实现到 Linux/macOS** —— 报错原文就在 `dsh-subprocess-local` 里；
 - **交互式终端依赖 PTY** —— 报错原文在 `dsh-terminal-bash` 里；
 - **Windows 的 ACL 沙箱以受限令牌隔离进程** —— `dsh-sandbox-windows-acl` 通过 FFI 直接调用 `createRestrictedToken`（带 restricting SID），而 MSYS 运行时需要创建共享内存映射，这类操作会被受限令牌拒绝。
 
-**本插件的 `git_exec` 不走那条路**，因此不受这些限制：
+即使不经过交互式 bash，**沙箱内的 git 也做不了远端操作**：实测在沙箱内 `git fetch` 会以 `error: cannot create standard input pipe for remote-https: Permission denied` 失败，而本地读操作不受影响。
+
+**本插件的 `git_exec` 两条都避开了**，因此不受这些限制：
 
 - 它把命令交给 dsh 的 `ctx.shell` 执行**一次性命令**（`ctx.shell` 每个 host 只有一个实现；在 Windows 上由 win32 层换成 **pwsh** 那套，在 Linux/macOS 上是 bash 那套），**不使用交互式 PTY，也不依赖终端检查器**；
-- 它以 `danger-full-access` 在沙箱**之外**运行 git，因此也不进入受限令牌沙箱。
+- 它以 `danger-full-access` 在沙箱**之外**运行 git，因此既不进入受限令牌沙箱，也不受沙箱的命名管道限制。
 
 换句话说，在 Windows 上它并不"绕道 Git Bash" —— 它走的是一条不撞上这些坑的路径，这一点可以通过本工具在 Windows 上正常推送/读取仓库直接验证。
 
@@ -74,7 +76,7 @@ dsh plugin --profile <profile> update git-for-dsh
 - 模型获得 `git_exec` 工具；
 - 设置面板出现「Git 工具」页，勾选即刻生效并持久化到 Profile 的 `settings.yaml`。
 
-Host 半注册 `git-tool` 设置命名空间；Client 半通过 `ctx.get('settingsScope')` 绑定同一命名空间写入。**清单本身在构建时从 `src/git-catalog.js` 直接嵌进浏览器产物**（`scripts/build.mjs` 替换 `__GIT_TOOL_CATALOG__`），所以勾选页和 Host 的闸门读的是同一份清单，而浏览器不需要任何通往 Host 的运行时通道 —— 改完目录要重新 `npm run build` 并刷新页面。
+Host 半注册 `tool-git` 设置条目；Client 半通过 `ctx.configForms.get('tool-git')` 取同一个表单读写。**清单本身在构建时从 `src/git-catalog.js` 直接嵌进浏览器产物**（`scripts/build.mjs` 替换 `__GIT_TOOL_CATALOG__`），所以勾选页和 Host 的闸门读的是同一份清单，而浏览器不需要任何通往 Host 的运行时通道 —— 改完目录要重新 `npm run build` 并刷新页面。
 
 设置页底部有一行「页面版本 `<构建指纹>`」（由 `scripts/build.mjs` 写入）。如果它与仓库里 `lib/client.js` 的指纹不一致，说明浏览器还在用旧的 bundle，强制刷新即可。
 
@@ -441,7 +443,7 @@ Host 半默认对 `write` 与 `remote` 档位的每一次调用弹出审批，�
 **两层兜底**（都在代码里，不依赖用户记得用上面的开关）：
 
 - Host 半的 `apply()` 把整段初始化包在 try/catch 里。初始化失败只在日志留下一行带原因的 `tool-git: activation failed …`，`git_exec` 不注册，会话照常可用。
-- Client 半导出 `inject: ['slots', 'settingsScope']`（这是让激活等待服务就绪的机制），服务确实缺失时用 `ctx.get()` 可选读取并降级成不可写页面；**整个工厂体包在 try/catch 里**，求值失败就交出一个空操作的插件，而不是让这次插件加载失败。页面本身还套了 React error boundary。
+- Client 半导出 `inject: ['slots', 'configForms']`（这是让激活等待服务就绪的机制），服务确实缺失时用 `ctx.get()` 可选读取并降级成不可写页面；**整个工厂体包在 try/catch 里**，求值失败就交出一个空操作的插件，而不是让这次插件加载失败。页面本身还套了 React error boundary。
 
 ## 开发
 
@@ -487,6 +489,7 @@ src/index.js         Host 半：git_exec 工具、设置命名空间、系统提
 src/client.js        Client 半：设置页 UI（勾选、策略、代理、日志）
 src/log.js           诊断日志：同步追加、脱敏、2MB 轮转
 src/proxy.js         代理端口探测与等待
+src/routes.js        4 条同源路由路径的唯一来源（宿主 import、构建嵌入、页面读取）
 scripts/build.mjs    把 src/ 拷贝到 lib/
 scripts/render-preview.mjs        渲染离线布局预览
 scripts/verify-served-bundle.mjs  用真实加载语义验证构建/服务的 bundle

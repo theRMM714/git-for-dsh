@@ -41,7 +41,7 @@
 `apply()` 初始化失败会让设置面板不可用（这是真实发生过的事故，见 PITFALLS 1），所以：
 
 - Host 半把整段初始化包在 try/catch 里：失败只留一行 `tool-git: activation failed …`，工具不注册，会话照常可用；
-- Client 半导出 `inject: ['slots', 'settingsScope']` 让激活等待服务就绪（**这是顺序保证的唯一来源**），服务确实缺失时降级成不可写页面，整个工厂体另有 try/catch，求值失败就交出空操作插件；页面本身还套 React error boundary。
+- Client 半导出 `inject: ['slots', 'configForms']` 让激活等待服务就绪（**这是顺序保证的唯一来源**），服务确实缺失时降级成不可写页面，整个工厂体另有 try/catch，求值失败就交出空操作插件；页面本身还套 React error boundary。
 
 代价：失败被吞掉时看起来像「功能没提供」。因此这些兜底都配了可见性 —— 日志里的 `activation failed` 一行、以及设置页上的状态行。
 
