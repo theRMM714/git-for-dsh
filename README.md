@@ -448,11 +448,13 @@ Host 半默认对 `write` 与 `remote` 档位的每一次调用弹出审批，�
 ## 开发
 
 ```sh
-npm test       # 66 个断言：目录、闸门、环境、拼接、Host 集成、Client bundle 加载/降级/渲染
+npm test       # 228 个测试：目录、闸门、环境、拼接、Host 集成、Client bundle 加载/降级/渲染
 npm run build  # 把 src/ 拷贝到 lib/，package.json 指向 lib/
 node scripts/verify-served-bundle.mjs <bundle>   # 用真实加载语义验证一个已构建/已服务的 bundle
 node scripts/verify-driver-hardening.mjs         # 用真实 git + 恶意仓库验证两条代码执行路径已关闭（含控制组）
 node scripts/verify-config-audit.mjs             # 用真实 git 验证审计命令能跑、能看到 include 进来的键、三种裁定正确
+node scripts/verify-artifacts.mjs                # 校验 lib/ 与 src/ 逐字节一致（构建产物漂移必须失败）
+node scripts/verify-nul-device.mjs               # 用真实 git for Windows 验证空设备加固（配置隐藏、钩子抑制，含对照）
 
 测试用夹具仓库位于 `.git-test-fixture/`（已加入 `.gitignore`）：3 个提交、1 个分支、1 个标签，用来在真实仓库上驱动工具而不污染工程本身。
 ```
@@ -495,6 +497,8 @@ scripts/render-preview.mjs        渲染离线布局预览
 scripts/verify-served-bundle.mjs  用真实加载语义验证构建/服务的 bundle
 scripts/verify-driver-hardening.mjs  真实 git + 恶意仓库验证代码执行路径已关闭（含控制组）
 scripts/verify-config-audit.mjs      真实 git 验证审计命令与三种裁定（含对照）
+scripts/verify-artifacts.mjs         校验 lib/ 与 src/ 逐字节一致
+scripts/verify-nul-device.mjs        真实 git for Windows 验证空设备加固（含对照）
 test/git-catalog.test.mjs  目录、闸门、环境、拼接
 test/host.test.mjs         Host 半集成（允许清单闸门、审批闸门、结果形状、兜底）
 test/client.test.mjs       Client bundle 真实加载、服务声明完备性、错误兜底
