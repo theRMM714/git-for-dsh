@@ -322,6 +322,14 @@ Host 半是普通 ESM，Client 半是手写的 client module bundle（`window.__
 
 排版问题（挤在一起、两行并成一行）靠断言发现不了，得看。`scripts/render-preview.mjs` 用构建产物里的页面组件渲染真实 DOM、再套上 shell 的样式表，因此不需要登录、不需要浏览器会话。代价：它依赖构建产物，改完 `src/client.js` 要先 build 才有意义。
 
+### 决策：版本号只服务于 npm，不出现在文档与界面里
+
+npm 需要 `version` 才能发布，registry 也需要它来解析范围，但代码从不读它。因此文档与界面里不写版本号 —— 它们描述的是当前实现，而实现只有一个版本。
+
+### 决策：所有 peer 依赖都是 optional
+
+本插件的每一条 peer 依赖都不在公共 registry 上：它们嵌在 `@deepseek-ai/dsh` 内部，npm 无法解析。所以全部标成 optional —— 既避免 "issues with peer dependencies found"，也不损失正确性：dsh 的 loader 在运行时按名字解析它们，而 `peerDependenciesMeta` 必须与 `peerDependencies` 一一对应。
+
 ### 决策：验证脚本一律带控制组
 
 凡是「某个危险行为没有发生」的结论，都必须先证明**加固之前它确实会发生** —— 否则「没看到标记」可能只是没武装（PITFALLS 10）。同理，闸门类测试必须断言**拒绝发生了**，而不只是断言命令跑通了（PITFALLS 7、21）。`verify-driver-hardening.mjs` 带两条显式控制组（未加固时两个标记都必须出现），`verify-config-audit.mjs` 带一条对照（不带 `--includes` 时同一个键必须不可见），两个脚本都调用**真实 git**，而不是只断言命令字符串。
