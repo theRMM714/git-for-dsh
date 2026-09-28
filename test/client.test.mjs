@@ -594,7 +594,6 @@ describe('client bundle: activation', () => {
       guardErrorPolicy: 'allow',
       pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
       bashPathMode: 'write-only',
-      scanScripts: false,
       scriptCheckPolicy: 'restrict',
       targetScope: 'allowlist',
       targetPaths: ['/work'],
@@ -615,7 +614,6 @@ describe('client bundle: activation', () => {
       guardErrorPolicy: 'allow',
       pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
       bashPathMode: 'write-only',
-      scanScripts: false,
       scriptCheckPolicy: 'restrict',
       targetScope: 'allowlist',
       targetPaths: ['/work'],
@@ -640,10 +638,9 @@ describe('client bundle: activation', () => {
     const fields = Object.keys(Config({}))
     assert.ok(fields.length > 0, 'the Host schema must expose its fields')
     /*
-     * `pathRules` is the one field whose embedded key differs: the Host schema deliberately
-     * gives it NO default (PITFALLS 35 — an absent key is what the row migration must see),
-     * while the page still needs the built-in row list to show before anything is stored.
-     * The projection carries it under its own name.
+     * `pathRules` is the one field whose embedded key differs: the page needs the built-in row
+     * list to draw before anything is stored, and that list is the Host's own
+     * `DEFAULT_PROTECTION_ROWS`. The projection carries it under its own name.
      */
     const projectedAs = new Map([['pathRules', 'protectionRows']])
     for (const field of fields) {

@@ -158,7 +158,6 @@ export function serializeCatalog() {
       bashPathMode: DEFAULT_BASH_PATH_MODE,
       targetScope: DEFAULT_TARGET_SCOPE,
       targetPaths: [],
-      scanScripts: true,
       heartbeat: false,
       sshCommand: DEFAULT_SSH_COMMAND,
       pluginEnabled: true,

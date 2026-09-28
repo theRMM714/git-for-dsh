@@ -125,8 +125,8 @@ const readPolicy = () => {
 | 0 | 基线与准备 | 基线记录、本文件 | ☐ |
 | 1 | 宿主半适配 | 设置层 + 条目标识 + 4 条路由 | ✔ 已完成 |
 | 2 | 客户端半迁移 | `configForms` 绑定 | ✔ 已完成 |
-| 3 | 真机验收 | V1–V7 实测 | ☐ |
-| 4 | 缺陷审计与清理 | §七 的 G 组 | ☐ |
+| 3 | 真机验收 | V1–V7 实测 | ✔ 已完成（使用者确认） |
+| 4 | 缺陷审计与清理 | §七 的 G/J/K 组 | 🔄 进行中 |
 | 5 | 文档同步与销账 | 三份文档定稿、删除本文件 | ☐ |
 
 **销账规则**（同 llm-for-dsh）
@@ -215,9 +215,24 @@ const readPolicy = () => {
 
 ### 阶段 4 · 缺陷审计与清理
 
-- [ ] **全面审计**：README / DESIGN / PITFALLS 与代码不符处、死代码、仓库卫生（本插件根目录暂无 `.tmp-*`）
-- [ ] 处理 §七 G12（Windows 理由的口径）
-- [ ] 逐条销账
+**已完成**
+
+- [x] 两份只读代码审计（J 组 15 条 / K 组 16 条，含 2 条高危）
+- [x] **K1** 守卫 catch 里 `current` 未定义 → 改 `policy.current`，并加**驱动监听器**的用例（已做反向验证：把 bug 放回去，该用例确实失败）
+- [x] **K2** Windows 下受保护路径基名恒空 → 抽出 `lastPathSegment`（按 `/[\\/]+/` 切分）三处统一 + 跨分隔符单测
+- [x] **J16** 分段控件写入字段错位（阶段 2 自己引入的回归）
+- [x] **配置迁移整体删除**（使用者指令：已有一键初始化与配置问题提示，迁移不再需要）
+  - 删除 `scanScripts` 字段与 `normalizeScriptCheck` 的迁移分支（schema、`DEFAULT_CONFIG`、归一化、激活日志、客户端解码、构建默认值）
+  - 恢复两处**因迁移而故意留空**的默认值：`pathRules` → `.default([])`、`scriptCheckPolicy` → `.default(DEFAULT_SCRIPT_CHECK_POLICY)`
+  - 拍平 `resolveProtectionRows` 中两个返回同一表达式的分支（即 **K4**）
+  - 删除 PITFALLS 35（整条都在讲这个迁移）并把 36 提为 35；DESIGN 去掉旧实现叙述与「迁移三纪律」
+  - 删除迁移用例；全仓已无 `scanScripts`/`migrat` 残留
+
+**待办（第二批起先出方案再执行）**
+
+- [ ] 死代码与整洁：K3、K5–K8、K10/G19（孤儿 JSDoc 约 12 处）、K11、K13–K16、J12–J14
+- [ ] 耦合与重复：J5（路由路径三份）、J10、J11（ssh 路径三份）、K12（git 词判定两份）、G18
+- [ ] G12 README 的 Windows 理由口径
 
 ### 阶段 5 · 文档同步与销账
 
@@ -275,7 +290,7 @@ const readPolicy = () => {
 | J6 | `client.js` `segmented` 调用 | 四个 tier 键用了字段名而非宿主的 `tierIds` 键，分段顺序退回客户端副本 | 中 | ✔ 已修（阶段 2） |
 | J7 | `client.js` | `GUARD_COPY`、`PATH_COPY` 无任何读取点 | 低 | ✔ 已删（阶段 2） |
 | J8 | `client.js` 导出块 | `exports.message` / `exports.inertScope` 无外部调用方。已取消导出，改为导出测试所需的 `decodeSection` | 低 | ✔ 已修（阶段 2） |
-| J9 | `client.js:382,415` | `scanScripts` 被解码但页面从不渲染/写入 | 低 | 仅记录 |
+| J9 | `client.js` | `scanScripts` 被解码但页面从不渲染/写入。**迁移删除后该字段整体消失** | 低 | ✔ 已删（阶段 4） |
 | J10 | `client.js:669-699` | config-check 两条请求用 `response.json()` 并吞掉真实错误（统一报「无法连接宿主」），与 `classifyJsonResponse` 的其余用法不一致 | 中 | 阶段 4 |
 | J11 | `client.js:1159,1165` vs `index.js:855,858,889-892` | Windows ssh 路径知识**写三份** | 中 | 阶段 4 |
 | J12 | `client.js:637-642` | `writePolicy` 的文档注释孤立在 `addPendingPath` 上方 | 低 | 阶段 4 |
@@ -292,12 +307,12 @@ const readPolicy = () => {
 | K1 | `index.js` 守卫 catch | `guardFailureVerdict(current.…)` 里 `current` 未定义。守卫抛错时 catch 自身再抛 `ReferenceError` 逃出监听器——正是该处注释声称要避免的"拖垮每次调用"。已改 `policy.current`，并新增**驱动监听器**的用例（反向验证：把 bug 放回去，该用例即以 `ReferenceError: current is not defined` 失败） | **高** | ✔ 已修（阶段 4） |
 | K2 | `index.js` 基名提取 | 用 `split('/')` 取基名，而 `absoluteProtectedPath` 返回**原生平台路径**（Windows 为反斜杠）→ Windows 上基名恒等于整条路径、`protectedNames` 恒不命中，`realpathSync` 的符号链接回退**永不执行**（凭据文件漏判）。已抽出 `git-catalog.lastPathSegment`（按 `/[\\/]+/` 切分）并在三处使用，配跨分隔符单测 | **高** | ✔ 已修（阶段 4） |
 | K3 | `index.js:2348` | 整行 re-export 无任何导入者（各测试都直接 import `git-catalog.js`） | 低 | 阶段 4 |
-| K4 | `git-catalog.js:1067-1071` | `if`/`else` 两分支返回同一表达式 | 低 | 阶段 4 |
+| K4 | `git-catalog.js` `resolveProtectionRows` | `if`/`else` 两分支返回同一表达式（那个判断只为区分迁移形状） | 低 | ✔ 已删（阶段 4，随迁移删除一并拍平） |
 | K5 | `git-catalog.js:426` | `FORBIDDEN_DASH_C` 只在注释里被引用，真正拦截在 `FORBIDDEN_GLOBAL:395` 与 `FORBIDDEN_GLOBAL_PREFIXES:414` | 低 | 阶段 4 |
 | K6 | `index.js:47, 37` | `DEFAULT_PROTECTION_ROWS` / `GUARD_POLICIES` 导入后未作值使用 | 低 | 阶段 4 |
 | K7 | `git-catalog.js:709` | `refuseMutation: true` 全仓无读取 | 低 | 阶段 4 |
 | K8 | `index.js:1343` | `typeof text === 'string'` 恒真（1336 已保证） | 低 | 阶段 4 |
-| K9 | `index.js:1343` 区、`git-catalog.js:154-155` | `scanScripts` 旧布尔/迁移/日志字段与第二个 read 分组的 title/hint 已无渲染点 | 低 | 阶段 4（**需先判定是否有意保留**：PITFALLS 35 记录了迁移语义） |
+| K9 | `index.js`、`git-catalog.js:154-155` | `scanScripts` 旧布尔/迁移/日志字段已无渲染点。**迁移整体删除后该项消失**；剩下第二个 read 分组的 title/hint 仍未渲染，留待第二批 | 低 | 部分已删（阶段 4） |
 | K10 | `index.js:621-630, 660-664, 679-688, 733-737, 999-1003, 1096-1116, 1406-1416, 1610-1616, 1720-1723`；`git-catalog.js:479-484, 515-520, 1011-1020` | **无后继声明的孤儿 JSDoc**（与 G19 同源） | 中 | 阶段 4 |
 | K11 | `git-catalog.js` / `index.js` | 零外部引用的导出：`isCredentialUrl` / `RISK_ORDER` / `FORBIDDEN_GLOBAL` / `BASE_ENV` / `SCAN_BUDGET` / `unboundedSteps`；`shellQuote` 与 `applyUnguarded` 仅测试引用 | 低 | 阶段 4（降内部 / 仅记录） |
 | K12 | `git-catalog.js:1110` vs `1123` | 同一"git 词"判定写两份，切分 `/[\\/]/` 与 `'/'` 不一致 | 中 | 阶段 4 |

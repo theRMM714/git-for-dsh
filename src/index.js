@@ -174,8 +174,8 @@ const CONFIG_FIELDS = {
   /**
    * The blacklist: one row per path, with the read, write and ask boxes.
    *
-   * No schema default: `migrateProtectionRows` reads this key to decide whether the stored
-   * document already carries a blacklist, and a default would hide that (PITFALLS 35).
+   * The built-in rows are always present — `resolveProtectionRows` merges them in — so this
+   * default only says "the operator has added none of their own yet".
    */
   pathRules: z
     .array(z.object({
@@ -184,6 +184,7 @@ const CONFIG_FIELDS = {
       write: z.boolean(),
       ask: z.boolean(),
     }))
+    .default([])
     .description('One row per protected path: read and write allow without asking, ask prompts for every access, nothing ticked means denied.'),
   /**
    * What happens when the guard ITSELF fails.
@@ -220,19 +221,9 @@ const CONFIG_FIELDS = {
    * ordinary matchers.
    */
   scriptCheckPolicy: z
-    // No default: an absent key is what the migration below needs to see.
     .union(SCRIPT_CHECK_POLICIES.map((policy) => z.const(policy)))
+    .default(DEFAULT_SCRIPT_CHECK_POLICY)
     .description('How hard to judge a shell script when it is written: strict refuses on any mention of git, restrict only on a real invocation in it (barely misfires), off does not look.'),
-  /**
-   * The boolean this policy replaced.
-   *
-   * Kept in the schema so an existing profile still validates, and read as a fallback by
-   * `normalizePolicy`: true is strict, false is off.
-   */
-  scanScripts: z
-    .boolean()
-    .default(true)
-    .description('Deprecated: superseded by scriptCheckPolicy. true means strict, false means off.'),
   /**
    * The ssh program git runs.
    *
@@ -358,7 +349,6 @@ export const DEFAULT_CONFIG = Object.freeze({
   scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
   targetScope: DEFAULT_TARGET_SCOPE,
   targetPaths: [],
-  scanScripts: true,
   heartbeat: false,
   sshCommand: DEFAULT_SSH_COMMAND,
   pluginEnabled: true,
@@ -659,34 +649,16 @@ export function retiredKeys(settings) {
 }
 
 /**
- * The one place a stored allowlist becomes the enforced one.
- * @param value - a resolved settings section, or the composition entry.
- * @returns the policy the gates read: unknown names dropped, booleans strict.
- */
-/**
- * The script check's tier, including the boolean that came before it.
+ * The script check's tier.
  *
  * @param value - the stored settings section.
  * @returns one of SCRIPT_CHECK_POLICIES.
  */
 function normalizeScriptCheck(value) {
   const stored = value?.scriptCheckPolicy
-  if (typeof stored === 'string' && SCRIPT_CHECK_POLICIES.includes(stored)) return stored
-  // Migration: an existing profile set the boolean, and that choice must survive.
-  if (value?.scanScripts === false) return 'off'
-  return DEFAULT_SCRIPT_CHECK_POLICY
+  return typeof stored === 'string' && SCRIPT_CHECK_POLICIES.includes(stored) ? stored : DEFAULT_SCRIPT_CHECK_POLICY
 }
 
-/**
- * Whether the operator's list is enforced, including the tier that came before it.
- *
- * The old single tier served both the list and the built-in files. A non-allow tier meant the
- * list was enforced, so that is what it migrates to; allow migrates to off. The direction
- * matters: an unclear old value stays strict.
- *
- * @param value - the stored settings section.
- * @returns true when the list should be enforced.
- */
 /**
  * A group's tier, falling back when the stored value is not one of them.
  *
@@ -718,7 +690,6 @@ function normalizePolicy(value) {
     targetPaths: Array.isArray(value?.targetPaths)
       ? value.targetPaths.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
       : [],
-    scanScripts: value?.scanScripts !== false,
     heartbeat: value?.heartbeat === true,
     sshCommand: typeof value?.sshCommand === 'string' && value.sshCommand.trim().length > 0
       ? value.sshCommand
@@ -1868,7 +1839,6 @@ function setup(ctx, config = {}) {
     pluginEnabled: policy.current.pluginEnabled,
     operations: policy.current.enabled.length,
     nativeGit: policy.current.nativeGitPolicy,
-    scanScripts: policy.current.scanScripts,
     sshCommand: policy.current.sshCommand,
     hostCredentials: policy.current.useHostCredentials,
     proxyPort: policy.current.proxyPort,

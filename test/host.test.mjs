@@ -887,13 +887,6 @@ describe('host plugin: the tool guard', () => {
     assert.equal(decision.kind, 'delegated')
   })
 
-  it('reads the boolean the tier replaced, so an existing profile keeps its choice', async () => {
-    // scanScripts: false used to mean "do not check", and that must still hold now that the
-    // setting is a policy.
-    const legacyOff = await decide(withTier({ scriptCheckPolicy: undefined, scanScripts: false }).recorded, writeScript('git status'))
-    assert.equal(legacyOff.kind, 'delegated')
-  })
-
   it('refuses native git in bash, and names the way forward', async () => {
     const { recorded } = mount()
     const decision = await decide(recorded, call('bash', { command: 'git status', description: 'x' }))
@@ -960,8 +953,8 @@ describe('host plugin: the tool guard', () => {
     const ask = mount({ settings: settingsWith({ nativeGitPolicy: 'ask' }) })
     assert.equal((await decide(ask.recorded, call('bash', { command: 'git status', description: 'x' }))).kind, 'ask')
 
-    // Identity: the default migrates to the ask box, so a read prompts; opening it to
-    // read+write lets the same read through without asking.
+    // A built-in row with no box ticked DENIES the read; ticking its read box lets the very
+    // same call through without asking.
     const identity = join(homedir(), '.gitconfig')
     const asked = mount({ settings: settingsWith({}) })
     assert.equal((await decide(asked.recorded, call('read', { file_path: identity }))).kind, 'deny')

@@ -365,7 +365,6 @@ window.__ModuleLoader__.load({
           scriptCheckPolicy: CATALOG.defaults.scriptCheckPolicy,
           targetScope: CATALOG.defaults.targetScope,
           targetPaths: [...(CATALOG.defaults.targetPaths ?? [])],
-          scanScripts: CATALOG.defaults.scanScripts !== false,
           sshCommand: CATALOG.defaults.sshCommand,
           pathRules: builtinRows(CATALOG.defaults.protectionRows),
           bashPathMode: CATALOG.defaults.bashPathMode ?? 'heuristic',
@@ -404,7 +403,6 @@ window.__ModuleLoader__.load({
           scriptCheckPolicy: isKnownTier('scriptCheck', section.scriptCheckPolicy, SCRIPT_COPY)
             ? section.scriptCheckPolicy
             : CATALOG.defaults.scriptCheckPolicy,
-          scanScripts: section.scanScripts !== false,
           sshCommand: typeof section.sshCommand === 'string' && section.sshCommand.length > 0
             ? section.sshCommand
             : CATALOG.defaults.sshCommand,
