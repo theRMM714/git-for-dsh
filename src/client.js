@@ -628,12 +628,6 @@ window.__ModuleLoader__.load({
           const canWrite = writable(snapshot)
 
           /**
-           * Write one namespace field, showing the choice at once and reporting a
-           * refused write rather than reverting in silence.
-           * @param field - the namespace field to write.
-           * @param next - the value the user chose.
-           */
-          /**
            * Add the pending path as a row with every box empty.
            *
            * Shared by the button and by Enter. A path already listed is not added twice, and the
@@ -697,7 +691,14 @@ window.__ModuleLoader__.load({
         checkConfiguration()
       }, [])
 
-      const writePolicy = (field, next) => {
+          /**
+           * Write one namespace field, showing the choice at once and reporting a refused write
+           * rather than reverting in silence.
+           *
+           * @param field - the namespace field to write.
+           * @param next - the value the user chose.
+           */
+          const writePolicy = (field, next) => {
             setDraft({ ...value, [field]: next })
             setWriteError(null)
             Promise.resolve(scope.set(field, next)).catch((error) => {
