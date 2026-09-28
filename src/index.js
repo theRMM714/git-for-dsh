@@ -157,20 +157,6 @@ const CONFIG_FIELDS = {
         + 'ask, or allow. git_exec is the supported path and passes the allowlist, the argument gate, the audit and approval.',
     ),
   /**
-   * What the guard does about the machine credential and identity files.
-   *
-   * `deny` and `ask` cover the tools whose arguments name a path, plus shell text
-   * that mentions one. It is a filter over ARGUMENTS: a caller that derives the path at
-   * runtime is not stopped, which is why this is documented as a rule and not a
-   * boundary.
-   */
-  /**
-   * Whether the operator's own protected list is enforced.
-   *
-   * Two states, not three: the list means "the AI must not touch this", so there is nothing
-   * useful to ask about. Turning it off keeps the list for later — that was the point.
-   */
-  /**
    * The blacklist: one row per path, with the read, write and ask boxes.
    *
    * The built-in rows are always present — `resolveProtectionRows` merges them in — so this
@@ -291,13 +277,6 @@ const CONFIG_FIELDS = {
     .default([])
     .description('Root directories git may run inside when targetScope is allowlist. One per entry; a target must fall inside one of them.'),
   /**
-   * Port for the operator's OWN proxy, which this plugin starts and nothing more.
-   *
-   * The plugin never proxies traffic and never holds a credential: the token stays
-   * with whatever the start command launches. 0 disables the feature, and git then
-   * inherits whatever proxy variables the dsh process already has.
-   */
-  /**
    * Let git read the machine's own credential configuration.
    *
    * Off by default: with it off, the global and system configuration are hidden and
@@ -313,6 +292,13 @@ const CONFIG_FIELDS = {
     .boolean()
     .default(false)
     .description('Let git use the machine credential helper/config so remote writes (push) can authenticate. Off: this tool cannot push at all. On: everything in ~/.gitconfig becomes effective again, including url.insteadOf and any helper program.'),
+  /**
+   * Port for the operator's OWN proxy, which this plugin starts and nothing more.
+   *
+   * The plugin never proxies traffic and never holds a credential: the token stays
+   * with whatever the start command launches. 0 disables the feature, and git then
+   * inherits whatever proxy variables the dsh process already has.
+   */
   proxyPort: z
     .number()
     .default(0)
@@ -609,16 +595,6 @@ function bindPolicy(ctx, config) {
 }
 
 /**
- * The keys in this namespace's USER layer that the current schema does not know.
- *
- * The user layer is what the operator actually wrote, so a key there that the schema has no
- * declaration for is a leftover from a setting this plugin no longer has. An empty list means
- * the stored configuration and the schema agree.
- *
- * @param settings - the settings service.
- * @returns the leftover key names, sorted.
- */
-/**
  * What the guard decides when it has thrown.
  *
  * Pure: the operator's answer to "the guard is broken" is a policy, so it is judged directly
@@ -638,6 +614,16 @@ export function guardFailureVerdict(policy, error) {
   }
 }
 
+/**
+ * The keys in this namespace's USER layer that the current schema does not know.
+ *
+ * The user layer is what the operator actually wrote, so a key there that the schema has no
+ * declaration for is a leftover from a setting this plugin no longer has. An empty list means
+ * the stored configuration and the schema agree.
+ *
+ * @param settings - the settings service.
+ * @returns the leftover key names, sorted.
+ */
 export function retiredKeys(settings) {
   if (typeof settings.describe !== 'function') return []
   const descriptor = settings.describe().find((entry) => String(entry.ns) === NAMESPACE)
@@ -701,11 +687,6 @@ function normalizePolicy(value) {
   }
 }
 
-/**
- * The real activation: settings scope, tool, prompt section, catalog RPC.
- * @param ctx - the plugin context.
- * @param config - the resolved config for this entry.
- */
 /**
  * Make sure the operator's proxy is running and return the environment that points
  * git at it.
@@ -826,8 +807,6 @@ const WINDOWS_NATIVE_CANDIDATES = Object.freeze([
   'C:\\Program Files\\Git\\usr\\bin\\ssh.exe',
 ])
 
-
-/** The route the settings page asks which ssh programs exist. */
 
 /**
  * Where an ssh is worth looking for, beyond whatever `$PATH` already holds.
@@ -962,11 +941,6 @@ function sshCandidatePaths() {
 }
 
 /**
- * Report which of those exist, are executable, and what they call themselves.
- *
- * @returns one row per candidate.
- */
-/**
  * Report what was found, and enough context to explain a negative.
  *
  * @returns `{ rows, checked, windowsMounts }`.
@@ -1041,15 +1015,6 @@ async function buildProxyReport(port, commandConfigured, effective) {
 }
 
 /**
- * Expand one configured path to an absolute path, following symlinks when it exists.
- *
- * The symlink step is what makes "link the credential into the workspace, then read
- * the link" land on the same answer.
- *
- * @param entry - a configured path, possibly tilde-prefixed.
- * @returns the absolute path.
- */
-/**
  * Expand a leading `~/` against the home directory.
  *
  * @param value - a path as the operator or the model wrote it.
@@ -1059,6 +1024,15 @@ function expandTilde(value) {
   return value.startsWith('~/') ? resolvePath(homedir(), value.slice(2)) : value
 }
 
+/**
+ * Expand one configured path to an absolute path, following symlinks when it exists.
+ *
+ * The symlink step is what makes "link the credential into the workspace, then read
+ * the link" land on the same answer.
+ *
+ * @param entry - a configured path, possibly tilde-prefixed.
+ * @returns the absolute path.
+ */
 function absoluteProtectedPath(entry) {
   const expanded = expandTilde(entry)
   const absolute = isAbsolute(expanded) ? resolvePath(expanded) : resolvePath(homedir(), expanded)
@@ -1068,28 +1042,6 @@ function absoluteProtectedPath(entry) {
     return absolute
   }
 }
-
-/**
- * The repository-config audit's cache, so a git call does not pay for a second process.
- *
- * Keyed by every input the verdict depends on — the directory, the policy, and the state
- * (mtime + size) of the repository's own configuration — so a changed configuration cannot
- * produce a stale verdict. Only the raw KEYS are cached; the verdict is recomputed per call
- * from the current subcommand, which is why the subcommand is not part of the key.
- *
- * Two limits are stated rather than hidden:
- *
- *  - **Includes.** The audit follows `[include]` directives, and the paths they name are not
- *    visible here without asking git — the very call being avoided. An edit to an included
- *    file is therefore caught by the TTL, not immediately.
- *  - **Worktrees.** Where `.git` is a file rather than a directory there is no configuration
- *    to watch, so nothing is cached at all.
- *
- * The `statSync` here reads a drvfs path on a Windows-mounted repository, which is exactly
- * what the guard must never do — and it is fine HERE, because this runs once per
- * `git_exec` call (an operation that already spawns processes) rather than on every tool
- * call.
- */
 
 /** How long a cached audit stays usable. Bounds an edit to an included file. */
 const AUDIT_CACHE_TTL_MS = 30_000
@@ -1380,17 +1332,6 @@ export function inspectToolCall(execution, current, cache) {
 }
 
 
-/**
- * The three protection groups, each with its own tier.
- *
- * Credentials come first because they are the highest stakes, and identity before the
- * operator's own list so that a path in both reports the more specific reason. A disabled
- * group carries 'allow', which produces no decision — it falls through to the next group
- * rather than ending the check.
- *
- * @param current - the live policy.
- * @returns the groups, in consultation order.
- */
 /** Commands that plainly read, for the bash heuristic. */
 const READ_COMMANDS = /\b(cat|ls|less|more|head|tail|grep|egrep|fgrep|rg|awk|cut|diff|wc|file|stat|strings|xxd|od|jq|nl|tac|du)\b/
 
@@ -1582,15 +1523,13 @@ function targetRefusal(policy, target, workspace) {
     + '若确实需要在别处执行，请把设置里的「目标范围」改为「指定路径」或「无限制」。'
 }
 
+/**
+ * The real activation: settings scope, tool, prompt section, catalog RPC.
+ * @param ctx - the plugin context.
+ * @param config - the resolved config for this entry.
+ */
 function setup(ctx, config = {}) {
   const policy = bindPolicy(ctx, config)
-  /**
-   * This activation's proxy lifecycle.
-   *
-   * `mode` says where the proxy came from: `external` means it was already
-   * listening (so this activation must never stop it), `started` means this
-   * activation ran the command (so it must stop it when the plugin goes away).
-   */
   /**
    * The port-test route behind the settings page's "test" button.
    *
@@ -1599,6 +1538,10 @@ function setup(ctx, config = {}) {
    */
   if (typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], (webCtx) => {
+      /*
+       * Which ssh programs exist. A click, not a per-call probe: see the log-route comment
+       * above, and entry 29 for why that distinction is load-bearing.
+       */
       webCtx.effect(() => webCtx.webServer.register({
         kind: 'exact',
         path: ROUTES.proxyCheck,
@@ -1694,10 +1637,6 @@ function setup(ctx, config = {}) {
         },
       }), 'tool-git: log route')
   
-      /*
-       * Which ssh programs exist. A click, not a per-call probe: see the log-route comment
-       * above, and entry 29 for why that distinction is load-bearing.
-       */
       /*
        * The configuration health check and the one-click reset. Same-origin, like the routes
        * above: the page has no other way to ask. GET reports whether the stored user layer
@@ -1857,6 +1796,27 @@ function setup(ctx, config = {}) {
    */
   const guardCache = { key: undefined, files: [], names: new Set() }
   // Per activation, like guardCache, and passed to whatever uses them.
+/**
+ * The repository-config audit's cache, so a git call does not pay for a second process.
+ *
+ * Keyed by every input the verdict depends on — the directory, the policy, and the state
+ * (mtime + size) of the repository's own configuration — so a changed configuration cannot
+ * produce a stale verdict. Only the raw KEYS are cached; the verdict is recomputed per call
+ * from the current subcommand, which is why the subcommand is not part of the key.
+ *
+ * Two limits are stated rather than hidden:
+ *
+ *  - **Includes.** The audit follows `[include]` directives, and the paths they name are not
+ *    visible here without asking git — the very call being avoided. An edit to an included
+ *    file is therefore caught by the TTL, not immediately.
+ *  - **Worktrees.** Where `.git` is a file rather than a directory there is no configuration
+ *    to watch, so nothing is cached at all.
+ *
+ * The `statSync` here reads a drvfs path on a Windows-mounted repository, which is exactly
+ * what the guard must never do — and it is fine HERE, because this runs once per
+ * `git_exec` call (an operation that already spawns processes) rather than on every tool
+ * call.
+ */
   const auditCache = new Map()
   const announced = new Set()
   /**
@@ -1928,6 +1888,13 @@ function setup(ctx, config = {}) {
     return next()
   })
 
+  /**
+   * This activation's proxy lifecycle.
+   *
+   * `mode` says where the proxy came from: `external` means it was already
+   * listening (so this activation must never stop it), `started` means this
+   * activation ran the command (so it must stop it when the plugin goes away).
+   */
   const proxy = { mode: undefined, process: undefined }
 
   // ── model-facing tool ─────────────────────────────────────────────────────

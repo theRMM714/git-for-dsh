@@ -295,7 +295,7 @@ const readPolicy = () => {
 | J11 | ssh 路径知识 | 客户端把 `C:\Windows\System32\OpenSSH\ssh.exe` 写死两处（且其中一处因双重转义**在界面上显示成双反斜杠**）。已由宿主响应带出 `windowsExample`，客户端改为插值——顺带修掉那个显示 bug | 中 | ✔ 已修（阶段 4） |
 | J12 | `client.js` | `writePolicy` 的文档注释孤立在 `addPendingPath` 上方，其定义处无注释且缩进有残留 | 低 | ✔ 已修（阶段 4） |
 | J13 | `scripts/render-preview.mjs` | 失效两处：假 service 仍是 `settingsScope`、React 桩缺 `useMemo`。均已修，实测渲染出 36 KB HTML 且含三个分段控件 | 中 | ✔ 已修（阶段 4） |
-| J14 | `test/client.test.mjs:95,164,201,209-214` | 未使用的桩与 recorder 字段；`styles`/`react/jsx-runtime` 从不被 require | 低 | 阶段 4 |
+| J14 | `test/client.test.mjs` | `react/jsx-runtime` 桩从未被 require；`styles` 桩挂在 `ctx.get` 上而页面读的是全局 `styles`，永远走不到；`effects` 计数器只写不读。均已删除 | 低 | ✔ 已修（阶段 4） |
 | J15 | `scripts/build.mjs` | 嵌入的 catalog/defaults 与宿主 schema 无漂移测试。已新增：`Config` 每个字段都必须有嵌入默认值（写明 `pathRules → protectionRows` 这处有意投影） | 高 | ✔ 已修（阶段 2） |
 | **J16** | `client.js` `segmented` | **阶段 2 自己引入的回归**：同一个 `field` 参数既当宿主 tier 键（`tiersFor`）又当配置字段名（`writePolicy`）。J6 把四处改成宿主键后，点击**写到了 Host 不存在的字段**上被拒绝，四个分段控件**静默失效**（使用者截图反馈）。已拆成 `segmented(field, tierKey, copy, current)`，并新增「每个分段控件写入的字段都必须被 Host 声明」的测试 | **高** | ✔ 已修（阶段 2 补正） |
 
@@ -313,9 +313,9 @@ const readPolicy = () => {
 | K7 | `git-catalog.js` | `refuseMutation: true` 全仓无读取 | 低 | ✔ 已删（阶段 4） |
 | K8 | `index.js` 脚本检查 | `typeof text === 'string'` 恒真（进入前已保证是字符串） | 低 | ✔ 已删（阶段 4） |
 | K9 | `index.js`、`git-catalog.js` | `scanScripts` 系列已随迁移删除；第二个 read 分组的 `title`/`hint` 也已删（`describeCatalog` 只取每个档位第一个分组的标题，其余分组只保留 `group` 与 `operations`） | 低 | ✔ 已删（阶段 4） |
-| K10 | `index.js:621-630, 660-664, 679-688, 733-737, 999-1003, 1096-1116, 1406-1416, 1610-1616, 1720-1723`；`git-catalog.js:479-484, 515-520, 1011-1020` | **无后继声明的孤儿 JSDoc**（与 G19 同源） | 中 | 阶段 4 |
+| K10/G19 | 孤儿 JSDoc | **审计结论需修正**：这些大多不是「死注释」，而是**注释与它的主语被挤开**（如 `proxyPort` 的说明被 `useHostCredentials` 的说明隔断）。已逐块归位 9 处、删除主语已不存在的 3 处。另发现 `git-catalog.js` 有 5 处注释**挂在了错误的声明上**（早前重排时注释没跟着走，例如 bash 档位说明挂到了 `lastPathSegment` 上），已一并归位或删除 | 中 | ✔ 已修（阶段 4） |
 | K11 | `git-catalog.js` / `index.js` | 六个导出**并非无人使用，而是只在自身模块内使用** → 去掉 `export` 降为内部；`shellQuote` 与 `applyUnguarded` 有测试引用，保留导出并注明 | 低 | ✔ 已处置（阶段 4） |
-| K12 | `git-catalog.js:1110` vs `1123` | 同一"git 词"判定写两份，切分 `/[\\/]/` 与 `'/'` 不一致 | 中 | 阶段 4 |
+| K12 | `git-catalog.js` | 同一「git 词」判定写两份，且独立的 `isGitWord` 用 `split('/')`——**与 K2 同一个 Windows 分隔符漏判**，会漏掉 `C:\…\git.exe`。已合并为一个谓词并改用 `lastPathSegment` | 中 | ✔ 已修（阶段 4） |
 | K13 | `git-catalog.js` 操作数上限 | **审计结论有误，不改**：两个分支各自可达且文案不同——`config` 同时有 `forbiddenFlags` 与 `maxOperands`（走第一条），`remote` 只有 `maxOperands`（走第二条）。合并会改变用户看到的拒绝文案 | 低 | ✔ 不改（有理由） |
 | K14 | `index.js` | `~/` 展开重复 → 已抽出 `expandTilde`；循环内重复的 `operands.join(' ')` 已提到循环外 | 低 | ✔ 已修（阶段 4） |
 | K15 | `git-catalog.js` `refuse()` | 返回的 `key` / `affects` 均无消费者（`reason` 已含键名，测试也不读） | 低 | ✔ 已删（阶段 4） |

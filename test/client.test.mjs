@@ -91,7 +91,6 @@ const React = {
 /** Modules the page's `require` can answer. */
 const PAGE_MODULES = {
   react: React,
-  'react/jsx-runtime': {},
   '@deepseek-ai/dsh-client-ui-settings': {},
 }
 
@@ -160,7 +159,7 @@ function loadPlugin(options = {}) {
   const { document, appended } = fakeDocument()
   const moduleExports = factory(require)
 
-  const calls = { slots: [], registered: null, effects: 0, binds: 0, namespace: null, watched: null, getCalls: [], setCalls: [], hostCalls: [] }
+  const calls = { slots: [], registered: null, binds: 0, namespace: null, watched: null, getCalls: [], setCalls: [], hostCalls: [] }
   const provided = new Set(options.provide ?? ['slots', 'configForms'])
   // `mode: 'memory'` reproduces what a non-loopback page reports: the namespace is
   // reachable and writable, but the client does not read it back.
@@ -211,12 +210,6 @@ function loadPlugin(options = {}) {
         return () => {
           if (typeof off === 'function') off()
         }
-      },
-    },
-    styles: {
-      insert() {
-        calls.effects += 1
-        return () => {}
       },
     },
   }
