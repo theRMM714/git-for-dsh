@@ -414,13 +414,6 @@ const FORBIDDEN_GLOBAL_PREFIXES = Object.freeze([
   '--attr-source=',
 ])
 
-/**
- * Config-injection forms. `-c key=value` and `--config-env=key=ENVVAR` set
- * configuration for one invocation — the documented escape hatch that reaches
- * `alias.*` or `core.hooksPath`. The tool sets the configuration IT needs
- * through `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` in the child environment,
- * which the caller cannot touch, so nothing legitimate needs these flags.
- */
 
 /**
  * The empty device, as this platform names it.
@@ -474,12 +467,6 @@ const BASE_ENV = Object.freeze({
 })
 
 /**
- * Options that name a PROGRAM for git to run — on the remote side for
- * `--upload-pack`/`--receive-pack`, or via `--exec`. They are refused for every
- * subcommand because each one is a direct command-execution primitive: the
- * named program runs on the local or remote host with git's own privileges.
- */
-/**
  * Options that turn an external diff or textconv driver back on. This tool
  * disables both for diff-producing subcommands, so a caller must not be able to
  * undo that.
@@ -503,18 +490,18 @@ const SHORT_FLAG_SCOPES = Object.freeze({
   '-x': Object.freeze(['rebase']),
 })
 
+/**
+ * Options that name a PROGRAM for git to run — on the remote side for
+ * `--upload-pack`/`--receive-pack`, or via `--exec`. They are refused for every
+ * subcommand because each one is a direct command-execution primitive: the
+ * named program runs on the local or remote host with git's own privileges.
+ */
 const EXEC_PROGRAM_OPTIONS = Object.freeze([
   '--upload-pack',
   '--receive-pack',
   '--exec',
 ])
 
-/**
- * Reject one token that would move the invocation to another repository, name a
- * program for git to execute, or inject configuration.
- * @param token - one argument after the subcommand name.
- * @returns null when the token is acceptable, otherwise the refusal reason.
- */
 /**
  * Whether a token is a URL that carries credentials.
  *
@@ -529,6 +516,12 @@ function isCredentialUrl(token) {
   return /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#@]*@/.test(token)
 }
 
+/**
+ * Reject one token that would move the invocation to another repository, name a
+ * program for git to execute, or inject configuration.
+ * @param token - one argument after the subcommand name.
+ * @returns null when the token is acceptable, otherwise the refusal reason.
+ */
 function forbiddenReason(token, subcommand) {
   if (isCredentialUrl(token)) {
     return (
@@ -1005,17 +998,6 @@ export const DEFAULT_PROTECTION_ROWS = Object.freeze([
 
 
 /**
- * How a path mentioned in a BASH command is judged.
- *
- *   heuristic   obvious reads count as reads, obvious writes as writes, everything else as a
- *               write — the conservative default
- *   write-only  any mention counts as a write, so reading a protected file needs the write
- *               box
- *
- * Either way this is a heuristic: the guard sees command text, not a file access.
- */
-/** What the tool guard does when IT fails: ask the operator, or delegate silently. */
-/**
  * The final segment of a path written with either separator.
  *
  * Windows paths reach this code with backslashes and POSIX ones with slashes, and one regex
@@ -1031,11 +1013,22 @@ export function lastPathSegment(value) {
   return parts.length === 0 ? '' : parts[parts.length - 1]
 }
 
+/** What the tool guard does when IT fails: ask the operator, or delegate silently. */
 export const GUARD_ERROR_POLICIES = Object.freeze(['ask', 'allow'])
 
 /** The default: a guard failure is never silent. */
 export const DEFAULT_GUARD_ERROR_POLICY = 'ask'
 
+/**
+ * How a path mentioned in a BASH command is judged.
+ *
+ *   heuristic   obvious reads count as reads, obvious writes as writes, everything else as a
+ *               write — the conservative default
+ *   write-only  any mention counts as a write, so reading a protected file needs the write
+ *               box
+ *
+ * Either way this is a heuristic: the guard sees command text, not a file access.
+ */
 export const BASH_PATH_MODES = Object.freeze(['heuristic', 'write-only'])
 
 /** The default bash judgement. */
