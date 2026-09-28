@@ -1068,10 +1068,7 @@ function protectionRow(entry) {
  */
 export function resolveProtectionRows(value) {
   const byPath = new Map()
-  // Only a NON-EMPTY list means the new shape is in use: an absent key validates to [], so
-  // emptiness says nothing about the operator's intent (PITFALLS 35, fourth shape).
-  const stored = Array.isArray(value?.pathRules) && value.pathRules.length > 0 ? value.pathRules : undefined
-  for (const entry of stored ?? []) {
+  for (const entry of Array.isArray(value?.pathRules) ? value.pathRules : []) {
     if (entry === null || typeof entry !== 'object' || typeof entry.path !== 'string') continue
     if (entry.path.length === 0) continue
     byPath.set(entry.path, protectionRow(entry))
@@ -1079,10 +1076,6 @@ export function resolveProtectionRows(value) {
   // Built-ins always exist: a stored document may open or close them, never lose them.
   for (const row of DEFAULT_PROTECTION_ROWS) {
     if (!byPath.has(row.path)) byPath.set(row.path, protectionRow(row))
-  }
-  if (stored !== undefined) {
-    // Already in the new shape: keep the operator's own rows and their boxes as they are.
-    return [...byPath.values()]
   }
   return [...byPath.values()]
 }
