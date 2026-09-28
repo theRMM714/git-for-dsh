@@ -282,6 +282,7 @@ const readPolicy = () => {
 | J13 | `scripts/render-preview.mjs:28-37` | React 桩缺 `useMemo`，而 `client.js:623-628` 会调用 → **预览校验已失效** | 中 | 阶段 4 |
 | J14 | `test/client.test.mjs:95,164,201,209-214` | 未使用的桩与 recorder 字段；`styles`/`react/jsx-runtime` 从不被 require | 低 | 阶段 4 |
 | J15 | `scripts/build.mjs` | 嵌入的 catalog/defaults 与宿主 schema 无漂移测试。已新增：`Config` 每个字段都必须有嵌入默认值（写明 `pathRules → protectionRows` 这处有意投影） | 高 | ✔ 已修（阶段 2） |
+| **J16** | `client.js` `segmented` | **阶段 2 自己引入的回归**：同一个 `field` 参数既当宿主 tier 键（`tiersFor`）又当配置字段名（`writePolicy`）。J6 把四处改成宿主键后，点击**写到了 Host 不存在的字段**上被拒绝，四个分段控件**静默失效**（使用者截图反馈）。已拆成 `segmented(field, tierKey, copy, current)`，并新增「每个分段控件写入的字段都必须被 Host 声明」的测试 | **高** | ✔ 已修（阶段 2 补正） |
 
 > 宿主半（`src/index.js`、`src/git-catalog.js`）的独立审计已完成，发现见下方 K 组。
 ### K 组 · 代码审计发现（`src/index.js` / `src/git-catalog.js`，只读审计，已逐条复核）

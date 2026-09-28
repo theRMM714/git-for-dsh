@@ -695,6 +695,30 @@ describe('client bundle: activation', () => {
     for (const button of buttons) assert.notEqual(button.props.disabled, true)
   })
 
+  it('every tier selector writes a field the Host actually declares', async () => {
+    // A selector needs BOTH the config field a click writes and the Host's own key for the
+    // tier list, and those names do not coincide (`nativeGitPolicy` vs `nativeGit`). Using one
+    // for both made a click write a field the Host does not have, so the control silently did
+    // nothing — which nothing noticed, because no test ever clicked one.
+    const { Config } = await import('../src/index.js')
+    const declared = new Set(Object.keys(Config({})))
+    const { calls } = activate()
+    const page = renderPage(calls)
+    const selectors = collect(
+      page,
+      (element) => typeof element.props?.className === 'string' && element.props.className.includes('git-tool-segItem'),
+    )
+    assert.ok(selectors.length >= 12, `the tier selectors must render their options (got ${selectors.length})`)
+    for (const selector of selectors) {
+      assert.notEqual(selector.props.disabled, true, 'a writable page must not disable a tier selector')
+      selector.props.onClick()
+    }
+    assert.ok(calls.setCalls.length >= 12, 'every click must reach the settings transport')
+    for (const call of calls.setCalls) {
+      assert.ok(declared.has(call.field), `a tier selector wrote "${call.field}", which the Host does not declare`)
+    }
+  })
+
   it('disables the controls only when there is no settings service at all', () => {
     // With slots but no configForms the page still registers, against an inert scope.
     // That — and only that — is the disabled case.
