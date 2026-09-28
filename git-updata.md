@@ -122,11 +122,11 @@ const readPolicy = () => {
 
 | 阶段 | 内容 | 产物 | 状态 |
 | --- | --- | --- | --- |
-| 0 | 基线与准备 | 基线记录、本文件 | ☐ |
+| 0 | 基线与准备 | 基线记录、本文件 | ✔ 已完成 |
 | 1 | 宿主半适配 | 设置层 + 条目标识 + 4 条路由 | ✔ 已完成 |
 | 2 | 客户端半迁移 | `configForms` 绑定 | ✔ 已完成 |
 | 3 | 真机验收 | V1–V7 实测 | ✔ 已完成（使用者确认） |
-| 4 | 缺陷审计与清理 | §七 的 G/J/K 组 | 🔄 进行中 |
+| 4 | 缺陷审计与清理 | §七 的 G/J/K 组 | ✔ 已完成 |
 | 5 | 文档同步与销账 | 三份文档定稿、删除本文件 | ☐ |
 
 **销账规则**（同 llm-for-dsh）
@@ -251,25 +251,25 @@ const readPolicy = () => {
 
 | # | 位置 | 问题 | 状态 |
 | --- | --- | --- | --- |
-| G1 | `src/index.js:517` | `settings.register` 已不存在，宿主半激活即抛错（`bindPolicy`） | 待处理 |
-| G2 | `src/index.js:519-526` | `scope.get()` / `scope.watch()` 已不存在；新模型无 watch，需改为按需读 | 待处理 |
-| G3 | `src/index.js:527` | `settings.update(NAMESPACE, patch)` 已不存在，改走 `configEditor.edit` | 待处理 |
-| G4 | `src/index.js:534` | `settings.replace(NAMESPACE, {})` 已不存在（重置功能） | 待处理 |
-| G5 | `src/index.js:88`、`src/client.js:263` | 常量 `git-tool` 与行 id `tool-git` 不一致，新模型按条目 id 寻址 | 待处理 |
-| G6 | `src/client.js:251` | `inject` 依赖已消失的 `settingsScope`，页面永久 pending | 待处理 |
-| G7 | `src/client.js:500-504` | `settingsScope.bind({namespace, decode})` 绑定方式已不存在 | 待处理 |
-| G8 | `src/index.js:1546,1578,1653,1680` | `ctx.get('webServer')` 在服务未就绪时拿到 undefined，**4 条路由全部静默跳过** | 待处理 |
-| G9 | `src/index.js:85` | `inject` 中的 `settings` 需按新模型复核（保留？） | 待处理 |
+| G1 | `bindPolicy` | `settings.register` 已不存在，宿主半激活即抛错 | 高 | ✔ 已修（阶段 1） |
+| G2 | `bindPolicy` | `scope.get()` / `scope.watch()` 已不存在；新模型无 watch，改为按需读 + 按引用身份记忆化 | 高 | ✔ 已修（阶段 1） |
+| G3 | `bindPolicy` | `settings.update(NAMESPACE, patch)` 已不存在，改走 `configEditor.edit` | 高 | ✔ 已修（阶段 1） |
+| G4 | `bindPolicy` | `settings.replace` 已不存在；重置改走 `configEditor.edit(entry, () => ({}))` | 高 | ✔ 已修（阶段 1） |
+| G5 | 标识一致性 | 常量 `git-tool` 与行 id `tool-git` 不一致，新模型按条目 id 寻址。宿主与客户端均已统一，路由路径与日志一并改名，路径抽成 `src/routes.js` 单一来源 | 高 | ✔ 已修（阶段 1、2、4） |
+| G6 | `client.js` `inject` | 依赖已消失的 `settingsScope`，页面永久 pending。改为 `['slots', 'configForms']` | 高 | ✔ 已修（阶段 2） |
+| G7 | `client.js` 绑定 | `settingsScope.bind({namespace, decode})` 已不存在，改为 `ctx.configForms.get(entryId)` + `whileServed` | 高 | ✔ 已修（阶段 2） |
+| G8 | 4 条同源路由 | `ctx.get('webServer')` 在服务未就绪时拿到 undefined，4 条路由全部静默跳过。改用 `ctx.inject(['webServer'], …)` | 高 | ✔ 已修（阶段 1） |
+| G9 | `inject` 中的 `settings` | 已移除；改为可选子作用域 `ctx.inject(['settings'], …)`，无设置服务的 profile 仍激活 | 中 | ✔ 已修（阶段 1） |
 
 ### H 组 · 需在阶段 4 审计确认
 
 | # | 位置 | 问题 | 状态 |
 | --- | --- | --- | --- |
-| G12 | `README.md`「在 Windows 上还有一条更硬的理由」 | 把不可用归因于「交互式 bash 工具起不来」，而实测真正的阻塞是**沙箱内 git 的远端操作被命名管道限制拒绝**（`cannot create standard input pipe for remote-https`）。理由需按实测改口径 | 待处理 |
-| G13 | 全仓 | 阶段 4 的全面缺陷审计（文档与代码不符、死代码、仓库卫生） | 待处理 |
+| G12 | README 的 Windows 理由 | **审计结论只对了一半**：它引用的两个报错串在 dsh 源码里**真实存在**（`dsh-terminal-bash`、`dsh-subprocess-local`），并非编造。已按「只写可验证事实」改写：去掉无法验证的笼统说法，补上实测的沙箱命名管道限制 | 中 | ✔ 已处理（阶段 4） |
+| G13 | 全面审计 | 已完成，产出 J 组 16 条 / K 组 16 条，全部有结论 | — | ✔ 已完成（阶段 4） |
 | G17 | 开发环境 | WSL 的 dsh 是 `0.1.5-rc.1`，其 schemastery **无 `.volatile()`**；部署端 0.1.7-rc.2。**开发/部署版本落差是本次故障没被发现的直接原因** | ✔ 已升级到 `0.1.7-rc.2` |
 | G18 | 标识字符串 | 日志前缀 `git-tool:` → `tool-git:`；默认日志文件 `git-for-dsh.log` → `tool-git.log`（与 llm-for-dsh 一致，它以条目 id 命名日志）；路由路径改名并单源化（见 J5） | ✔ 已修（阶段 4） |
-| G19 | `src/index.js:150-169, 293-299` | 三处**孤立注释块**（描述已不存在的字段）；另 `proxyPort` 的注释与其字段之间被 `useHostCredentials` 的注释隔开 | 待处理 |
+| G19 | 孤儿注释 | 三处陈旧块已删；`proxyPort` 的注释等 9 处已归位（详见 K10） | 中 | ✔ 已修（阶段 4） |
 
 ### I 组 · 本次明确不做（附理由）
 
