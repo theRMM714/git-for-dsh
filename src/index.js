@@ -994,6 +994,9 @@ function sshCandidateScan() {
     rows,
     checked: rows.length,
     nativeWindows: IS_WINDOWS,
+    // The path the page names when nothing was found. Kept here so the advice cannot drift
+    // from the list this probe actually looks in.
+    windowsExample: WINDOWS_NATIVE_CANDIDATES[0],
     platform: process.platform,
     // Whether any Windows drive was visible at all: a negative report means "install ssh"
     // only when the places it would live in could actually be looked at.
@@ -1343,9 +1346,10 @@ export function inspectToolCall(execution, current, cache) {
       ...(Array.isArray(args.argv) ? args.argv : []),
       ...(Array.isArray(args.paths) ? args.paths : []),
     ].filter((item) => typeof item === 'string' && item.length > 0)
-    const kind = bashAccessKind(operands.join(' '), current.bashPathMode ?? DEFAULT_BASH_PATH_MODE)
+    const operandText = operands.join(' ')
+    const kind = bashAccessKind(operandText, current.bashPathMode ?? DEFAULT_BASH_PATH_MODE)
     for (const row of current.pathRules) {
-      if (operands.length > 0 && mentionsProtectedPath(operands.join(' '), [row.path])) {
+      if (operands.length > 0 && mentionsProtectedPath(operandText, [row.path])) {
         const decision = rowDecision(row, kind, `git_exec 的参数里出现了黑名单路径「${row.path}」`)
         if (decision !== undefined) return decision
       }
