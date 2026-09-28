@@ -29,6 +29,7 @@ const React = {
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
   useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
   useEffect: () => {},
+  useMemo: (compute) => compute(),
   Component: class {
     constructor(props) {
       this.props = props ?? {}
@@ -62,9 +63,13 @@ const ctx = new Proxy(
               calls.component = component
             },
           }
-        : name === 'settingsScope'
+        : name === 'configForms'
           ? {
-              bind: () => ({
+              whileServed: (namespaces, register) => {
+                register(new Set(namespaces))
+                return () => {}
+              },
+              get: () => ({
                 getSnapshot: () => ({
                   status: 'ready',
                   value: { enabled: ['status', 'diff', 'log', 'show'], approveMutating: true, dangerousKeyPolicy: 'refuse-repo' },

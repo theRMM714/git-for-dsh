@@ -20,6 +20,7 @@ import { apply, applyUnguarded, Config, DEFAULT_CONFIG, inject as pluginInject }
 import { fileStamp } from '../src/index.js'
 import { retiredKeys, guardFailureVerdict, inspectToolCall } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
+import { ROUTES } from '../src/routes.js'
 
 /** The editable fields of this plugin's own config, in schema order. */
 const CONFIG_FIELDS = Object.keys(Config({}))
@@ -508,13 +509,13 @@ describe('host plugin: the port test route', () => {
 
   /** Drive the registered handler with a fake request and response. */
   const ask = async (recorded, query) => {
-    const route = recorded.routes.find((row) => row.path === '/git-tool/proxy-check')
+    const route = recorded.routes.find((row) => row.path === ROUTES.proxyCheck)
     assert.ok(route !== undefined, 'the route must be registered')
     assert.equal(route.kind, 'exact')
     let body = ''
     let status = 0
     await route.handler(
-      { url: '/git-tool/proxy-check?' + query },
+      { url: ROUTES.proxyCheck + '?' + query },
       {
         setHeader() {},
         set statusCode(code) {

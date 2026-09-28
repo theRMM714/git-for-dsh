@@ -48,6 +48,7 @@ import {
   DEFAULT_BASH_PATH_MODE,
   describeCatalog,
 } from '../src/git-catalog.js'
+import { ROUTES } from '../src/routes.js'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
@@ -105,7 +106,7 @@ function buildStamp(parts) {
 // beside it in `lib/`.
 // Every host module the entry point imports has to be here: a missing one makes
 // `lib/index.js` fail to load at activation.
-for (const file of ['index.js', 'git-catalog.js', 'proxy.js', 'log.js']) {
+for (const file of ['index.js', 'git-catalog.js', 'proxy.js', 'log.js', 'routes.js']) {
   copyFileSync(`${root}src/${file}`, `${lib}${file}`)
 }
 
@@ -131,6 +132,7 @@ function operationCount(text) {
 export function serializeCatalog() {
   const payload = {
     catalog: describeCatalog(),
+    routes: { ...ROUTES },
     defaults: {
       enabled: [...DEFAULT_ENABLED],
       approveMutating: true,
@@ -189,7 +191,7 @@ if (!clientSource.includes(BUILD_TOKEN)) {
 }
 const serialized = serializeCatalog()
 const stamp = buildStamp([
-  ...['index.js', 'git-catalog.js', 'proxy.js', 'log.js'].map((file) => readFileSync(`${root}src/${file}`, 'utf8')),
+  ...['index.js', 'git-catalog.js', 'proxy.js', 'log.js', 'routes.js'].map((file) => readFileSync(`${root}src/${file}`, 'utf8')),
   clientSource,
   serialized,
 ])

@@ -268,7 +268,7 @@ const readPolicy = () => {
 | G12 | `README.md`「在 Windows 上还有一条更硬的理由」 | 把不可用归因于「交互式 bash 工具起不来」，而实测真正的阻塞是**沙箱内 git 的远端操作被命名管道限制拒绝**（`cannot create standard input pipe for remote-https`）。理由需按实测改口径 | 待处理 |
 | G13 | 全仓 | 阶段 4 的全面缺陷审计（文档与代码不符、死代码、仓库卫生） | 待处理 |
 | G17 | 开发环境 | WSL 的 dsh 是 `0.1.5-rc.1`，其 schemastery **无 `.volatile()`**；部署端 0.1.7-rc.2。**开发/部署版本落差是本次故障没被发现的直接原因** | ✔ 已升级到 `0.1.7-rc.2` |
-| G18 | `src/index.js` | 日志与部分提示仍用 `git-tool` 前缀，路由路径也仍是 `/git-tool/*`。标识已统一为 `tool-git`，日志标签与路由路径是否跟随需单独决定（路由改名要同步客户端） | 待处理 |
+| G18 | 标识字符串 | 日志前缀 `git-tool:` → `tool-git:`；默认日志文件 `git-for-dsh.log` → `tool-git.log`（与 llm-for-dsh 一致，它以条目 id 命名日志）；路由路径改名并单源化（见 J5） | ✔ 已修（阶段 4） |
 | G19 | `src/index.js:150-169, 293-299` | 三处**孤立注释块**（描述已不存在的字段）；另 `proxyPort` 的注释与其字段之间被 `useHostCredentials` 的注释隔开 | 待处理 |
 
 ### I 组 · 本次明确不做（附理由）
@@ -286,7 +286,7 @@ const readPolicy = () => {
 | J2 | `scripts/build.mjs` `serializeCatalog` | 嵌入浏览器的 `defaults` 手工重述宿主默认值，已与 schema 漂移（缺 `guardErrorPolicy`） | 高 | ✔ 已修（阶段 2） |
 | J3 | `scripts/verify-served-bundle.mjs` | 断言 `inject` 含 `settingsScope`，阶段 2 改完必然失败。已迁移断言、裸读清单、假 service 与全部场景 | 高 | ✔ 已修（阶段 2） |
 | J4 | `src/client.js` | 客户端 `NAMESPACE` 与 slot id 仍用 `'git-tool'` | 高 | ✔ 已修（阶段 2） |
-| J5 | `client.js:545,567,588` vs `index.js:839,862,865,1046` | 4 条路由路径客户端**硬编码**、宿主另有常量、测试再硬编码一遍（**三份**） | 中 | 阶段 4 |
+| J5 | 路由路径 | **三份副本**（客户端硬编码 / 宿主常量 / 测试）。已新增 `src/routes.js` 作为唯一来源：宿主 import、`build.mjs` 嵌进 bundle、页面读 `CATALOG.routes`、测试也 import 它——构造上不可能漂移。路径同步改名 `/tool-git/*` | 中 | ✔ 已修（阶段 4） |
 | J6 | `client.js` `segmented` 调用 | 四个 tier 键用了字段名而非宿主的 `tierIds` 键，分段顺序退回客户端副本 | 中 | ✔ 已修（阶段 2） |
 | J7 | `client.js` | `GUARD_COPY`、`PATH_COPY` 无任何读取点 | 低 | ✔ 已删（阶段 2） |
 | J8 | `client.js` 导出块 | `exports.message` / `exports.inertScope` 无外部调用方。已取消导出，改为导出测试所需的 `decodeSection` | 低 | ✔ 已修（阶段 2） |
@@ -294,7 +294,7 @@ const readPolicy = () => {
 | J10 | `client.js:669-699` | config-check 两条请求用 `response.json()` 并吞掉真实错误（统一报「无法连接宿主」），与 `classifyJsonResponse` 的其余用法不一致 | 中 | 阶段 4 |
 | J11 | `client.js:1159,1165` vs `index.js:855,858,889-892` | Windows ssh 路径知识**写三份** | 中 | 阶段 4 |
 | J12 | `client.js` | `writePolicy` 的文档注释孤立在 `addPendingPath` 上方，其定义处无注释且缩进有残留 | 低 | ✔ 已修（阶段 4） |
-| J13 | `scripts/render-preview.mjs:28-37` | React 桩缺 `useMemo`，而 `client.js:623-628` 会调用 → **预览校验已失效** | 中 | 阶段 4 |
+| J13 | `scripts/render-preview.mjs` | 失效两处：假 service 仍是 `settingsScope`、React 桩缺 `useMemo`。均已修，实测渲染出 36 KB HTML 且含三个分段控件 | 中 | ✔ 已修（阶段 4） |
 | J14 | `test/client.test.mjs:95,164,201,209-214` | 未使用的桩与 recorder 字段；`styles`/`react/jsx-runtime` 从不被 require | 低 | 阶段 4 |
 | J15 | `scripts/build.mjs` | 嵌入的 catalog/defaults 与宿主 schema 无漂移测试。已新增：`Config` 每个字段都必须有嵌入默认值（写明 `pathRules → protectionRows` 这处有意投影） | 高 | ✔ 已修（阶段 2） |
 | **J16** | `client.js` `segmented` | **阶段 2 自己引入的回归**：同一个 `field` 参数既当宿主 tier 键（`tiersFor`）又当配置字段名（`writePolicy`）。J6 把四处改成宿主键后，点击**写到了 Host 不存在的字段**上被拒绝，四个分段控件**静默失效**（使用者截图反馈）。已拆成 `segmented(field, tierKey, copy, current)`，并新增「每个分段控件写入的字段都必须被 Host 声明」的测试 | **高** | ✔ 已修（阶段 2 补正） |

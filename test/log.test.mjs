@@ -162,7 +162,7 @@ describe('the default destination', () => {
   it('sits beside the harness state, not on a Windows drive', () => {
     // This file is written synchronously once per tool call, so where it lives is a
     // performance decision, not a cosmetic one.
-    assert.match(defaultLogPath(), /git-for-dsh\.log$/)
+    assert.match(defaultLogPath(), /tool-git\.log$/)
     assert.ok(defaultLogPath().startsWith('/'))
   })
 })
