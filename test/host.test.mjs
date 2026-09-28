@@ -730,7 +730,6 @@ describe('host plugin: a guard that has failed', () => {
     assert.match(guardFailureVerdict('ask', undefined).reason, /守卫自身出错/)
   })
 })
-
 describe('the ruling logic is callable on its own', () => {
   /*
    * A literal policy, no fixture and no listener: this is what makes the ruling logic testable
@@ -828,6 +827,27 @@ describe('host plugin: the tool guard', () => {
     return delegated ? { kind: 'delegated', reason: '' } : decision
   }
 
+  it('contains a throwing guard instead of taking the tool pipeline with it', async () => {
+    /*
+     * The guard must absorb its OWN failure: a throw from here would break every tool call
+     * in the session. Reading the call's arguments is the first thing it does, so an object
+     * whose property access throws is the cheapest real failure.
+     */
+    const { recorded } = mount()
+    const explosive = {
+      name: 'read',
+      arguments: new Proxy({}, {
+        get() {
+          throw new Error('guard exploded')
+        },
+      }),
+      agent: { session: { header: { cwd: '/repo' } } },
+      signal: new AbortController().signal,
+    }
+    const decision = await decide(recorded, explosive)
+    assert.equal(decision.kind, 'ask', 'a broken guard must ask, never delegate silently')
+    assert.match(decision.reason, /guard exploded/)
+  })
   const call = (name, args, cwd = '/fake/cwd') => ({ name, arguments: args, agent: { session: { header: { cwd } } }, signal: new AbortController().signal })
 
   /** A settings section whose script check is the given tier. */

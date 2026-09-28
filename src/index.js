@@ -54,6 +54,7 @@ import {
   DEFAULT_SSH_COMMAND,
   containsNativeGit,
   mentionsProtectedPath,
+  lastPathSegment,
   reachesProtectedPath,
   CONFIG_POLICIES,
   DEFAULT_CONFIG_POLICY,
@@ -1194,7 +1195,7 @@ function protectedTargets(paths, cache) {
     const files = paths.map((entry) => absoluteProtectedPath(entry))
     cache.key = key
     cache.files = files
-    cache.names = new Set(files.map((file) => file.split('/').slice(-1)[0]))
+    cache.names = new Set(files.map((file) => lastPathSegment(file)))
   }
   return cache
 }
@@ -1220,7 +1221,7 @@ function reachesCandidate(raw, cwd, protectedFiles, protectedNames) {
   const absolute = isAbsolute(expanded) ? resolvePath(expanded) : resolvePath(cwd, expanded)
   const direct = reachesProtectedPath(absolute, protectedFiles)
   if (direct !== undefined) return direct
-  const base = absolute.split('/').slice(-1)[0]
+  const base = lastPathSegment(absolute)
   if (base === undefined || !protectedNames.has(base)) return undefined
   /*
    * Silence is right HERE, and only here: a realpath that fails almost always means the
@@ -1946,7 +1947,7 @@ function setup(ctx, config = {}) {
       ctx.logger?.warn?.(`git-tool: the tool guard failed: ${error instanceof Error ? error.message : String(error)}`)
       // The failure is the guard's, not the command's, and the message says so: the operator is
       // being asked about a defect, which is what makes a broken guard visible.
-      const failure = guardFailureVerdict(current.guardErrorPolicy ?? DEFAULT_GUARD_ERROR_POLICY, error)
+      const failure = guardFailureVerdict(policy.current.guardErrorPolicy ?? DEFAULT_GUARD_ERROR_POLICY, error)
       if (failure !== undefined) return failure
     }
     return next()

@@ -289,8 +289,8 @@ const readPolicy = () => {
 
 | # | 位置 | 问题 | 严重度 | 归属阶段 |
 | --- | --- | --- | --- | --- |
-| K1 | `index.js:1949` | `guardFailureVerdict(current.guardErrorPolicy ?? …)` 里 **`current` 未定义**（同作用域相邻处用的是 `policy.current`）。守卫抛错时 catch 自身再抛 `ReferenceError` 逃出 `tools/pre-execute` 监听器——正是该注释声称要避免的"拖垮每次调用"。测试是直接调 `guardFailureVerdict`，所以没覆盖到 | **高（真实 bug）** | **阶段 4 必修** |
-| K2 | `index.js:1197, 1223` | 用 `split('/')` 取 basename，而 `absoluteProtectedPath` 返回的是**原生平台路径**（Windows 为反斜杠）→ Windows 上 `base` 恒等于整条路径、`protectedNames.has(base)` 恒假，于是 `:1231` 的 `realpathSync` 回退**永不执行**（符号链接指向凭据文件时漏判）。`git-catalog.js:1328` 用的是 `/[\\/]+/`，两边不一致 | **高（Windows 下保护失效）** | **阶段 4 必修** |
+| K1 | `index.js` 守卫 catch | `guardFailureVerdict(current.…)` 里 `current` 未定义。守卫抛错时 catch 自身再抛 `ReferenceError` 逃出监听器——正是该处注释声称要避免的"拖垮每次调用"。已改 `policy.current`，并新增**驱动监听器**的用例（反向验证：把 bug 放回去，该用例即以 `ReferenceError: current is not defined` 失败） | **高** | ✔ 已修（阶段 4） |
+| K2 | `index.js` 基名提取 | 用 `split('/')` 取基名，而 `absoluteProtectedPath` 返回**原生平台路径**（Windows 为反斜杠）→ Windows 上基名恒等于整条路径、`protectedNames` 恒不命中，`realpathSync` 的符号链接回退**永不执行**（凭据文件漏判）。已抽出 `git-catalog.lastPathSegment`（按 `/[\\/]+/` 切分）并在三处使用，配跨分隔符单测 | **高** | ✔ 已修（阶段 4） |
 | K3 | `index.js:2348` | 整行 re-export 无任何导入者（各测试都直接 import `git-catalog.js`） | 低 | 阶段 4 |
 | K4 | `git-catalog.js:1067-1071` | `if`/`else` 两分支返回同一表达式 | 低 | 阶段 4 |
 | K5 | `git-catalog.js:426` | `FORBIDDEN_DASH_C` 只在注释里被引用，真正拦截在 `FORBIDDEN_GLOBAL:395` 与 `FORBIDDEN_GLOBAL_PREFIXES:414` | 低 | 阶段 4 |
