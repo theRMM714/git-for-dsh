@@ -1111,9 +1111,7 @@ export function containsNativeGit(command, spend = unboundedSteps) {
     // whose entire purpose is to print a credential.
     let end = found
     while (end < command.length && spend(1) && !separators.includes(command[end])) end += 1
-    const word = command.slice(found, end).toLowerCase()
-    const base = lastPathSegment(word)
-    if (base === 'git' || base === 'git.exe' || base.startsWith('git-credential')) return true
+    if (isGitWord(command.slice(found, end))) return true
   }
   return false
 }
@@ -1125,7 +1123,7 @@ export function containsNativeGit(command, spend = unboundedSteps) {
  * @returns true for `git`, a path ending in git, `git.exe`, or a `git-credential` helper.
  */
 function isGitWord(word) {
-  const base = word.split('/').slice(-1)[0].toLowerCase()
+  const base = lastPathSegment(word).toLowerCase()
   return base === 'git' || base === 'git.exe' || base.startsWith('git-credential')
 }
 
