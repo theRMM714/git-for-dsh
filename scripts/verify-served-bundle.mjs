@@ -9,7 +9,7 @@
  * repository copy:
  *
  *   1. the module id is the package name;
- *   2. it exports `apply` and NO `inject` — a declaration here either fails the
+ *   2. it declares the services it reads — a missing declaration fails the
  *      Guard's service read or parks the package forever;
  *   3. no service is reached as a bare `ctx.<service>` property in shipped code;
  *   4. `apply` runs against a context that REFUSES property reads (the page's
@@ -80,8 +80,8 @@ const mod = registry.get(PACKAGE_NAME)((name) => {
 // ── 2. Shape of the exports ────────────────────────────────────────────────
 check('exports apply', typeof mod.apply === 'function')
 check(
-  'declares slots and settingsScope',
-  Array.isArray(mod.inject) && mod.inject.includes('slots') && mod.inject.includes('settingsScope'),
+  'declares slots and configForms',
+  Array.isArray(mod.inject) && mod.inject.includes('slots') && mod.inject.includes('configForms'),
   `inject = ${JSON.stringify(mod.inject)}`,
 )
 
@@ -89,7 +89,7 @@ check(
 const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 // A bare service read is legal ONLY for a declared service, so this checks for
 // UNDECLARED reads rather than forbidding reads altogether.
-const undeclared = ['slots', 'settingsScope', 'theme', 'locale', 'connection', 'remote', 'timer', 'sessions', 'layout', 'styles']
+const undeclared = ['slots', 'configForms', 'theme', 'locale', 'connection', 'remote', 'timer', 'sessions', 'layout', 'styles']
   .map((name) => `ctx.${name}`)
   .filter((form) => code.includes(form))
   .filter((form) => !(mod.inject ?? []).includes(form.slice(4)))
@@ -124,10 +124,16 @@ function pageContext(provided) {
         calls.registered = { spec, component }
       },
     },
-    settingsScope: {
-      bind() {
+    configForms: {
+      get() {
         calls.binds += 1
         return scope
+      },
+      whileServed(namespaces, register) {
+        const off = register(new Set(namespaces))
+        return () => {
+          if (typeof off === 'function') off()
+        }
       },
     },
     styles: { insert: () => () => {} },
@@ -152,7 +158,7 @@ function pageContext(provided) {
 }
 
 // ── 4. Activation, with and without the services ──────────────────────────
-for (const provided of [['slots', 'settingsScope'], ['slots'], ['settingsScope'], []]) {
+for (const provided of [['slots', 'configForms'], ['slots'], ['configForms'], []]) {
   const label = provided.length === 0 ? 'no services' : provided.join('+')
   const { ctx, calls, document } = pageContext(provided)
   let thrown
@@ -172,15 +178,15 @@ for (const provided of [['slots', 'settingsScope'], ['slots'], ['settingsScope']
     check(`apply() with ${label} ships the card rule`, css.includes('.git-tool-tier{'))
     check(`apply() with ${label} ships the two-line rule`, css.includes('.git-tool-itemBody{display:flex'))
   }
-  if (provided.includes('slots') && provided.includes('settingsScope')) {
+  if (provided.includes('slots') && provided.includes('configForms')) {
     check(`apply() with ${label} watches settings.section`, calls.slots.includes('settings.section'), JSON.stringify(calls.slots))
-    check(`apply() with ${label} binds the git-tool namespace`, calls.binds === 1, `binds=${calls.binds}`)
+    check(`apply() with ${label} requests the tool-git form`, calls.binds === 1, `forms=${calls.binds}`)
   }
 }
 
 // ── 5. The page component renders ─────────────────────────────────────────
 {
-  const { ctx, calls } = pageContext(['slots', 'settingsScope'])
+  const { ctx, calls } = pageContext(['slots', 'configForms'])
   mod.apply(ctx)
   const element = calls.registered === null ? undefined : calls.registered.component({})
   check('registers a component when the slot ledger answers', element !== undefined)

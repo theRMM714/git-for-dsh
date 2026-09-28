@@ -3,15 +3,14 @@
  *
  * Every assertion here exists because of a field failure, not a hypothetical:
  *
- *  - **An undeclared service read failed the plugin load.** An earlier version
- *    read `ctx.slots` while declaring only `settingsScope`. The Guard's rule —
- *    "declare a service on the plugin you return, or reach it with `ctx.get`" —
- *    was applied against a package-level declaration list that holds PACKAGE
- *    names, so the read was rejected and the whole plugin failed to load with
- *    `failed to apply loader entry … cannot get property "slots" without inject`.
- *  - **Declaring the service instead parks the package.** The bundle therefore declares only
- *    the two it cannot work without — `slots` and `settingsScope` — and reads every other
- *    service with `ctx.get`, the optional form.
+ *  - **The Guard's rule is "declare a service on the plugin you return, or reach it with
+ *    `ctx.get`".** A package-level declaration list holds PACKAGE names, so a bare
+ *    `ctx.slots` read without a service declaration is rejected and the whole plugin
+ *    fails to load with `cannot get property "slots" without inject`.
+ *  - **The bundle therefore declares only the two it cannot work without — `slots` and
+ *    `configForms` — and reads every other service with `ctx.get`, the optional form.**
+ *    A declared name that no longer exists is the worse failure: the entry stays pending
+ *    forever and the boot reports it.
  *  - **A throw during module evaluation failed the load too.** The factory body
  *    is wrapped, so a broken body degrades to a no-op.
  *
@@ -161,8 +160,8 @@ function loadPlugin(options = {}) {
   const { document, appended } = fakeDocument()
   const moduleExports = factory(require)
 
-  const calls = { slots: [], registered: null, effects: 0, binds: 0, namespace: null, getCalls: [], setCalls: [], hostCalls: [] }
-  const provided = new Set(options.provide ?? ['slots', 'settingsScope'])
+  const calls = { slots: [], registered: null, effects: 0, binds: 0, namespace: null, watched: null, getCalls: [], setCalls: [], hostCalls: [] }
+  const provided = new Set(options.provide ?? ['slots', 'configForms'])
   // `mode: 'memory'` reproduces what a non-loopback page reports: the namespace is
   // reachable and writable, but the client does not read it back.
   const snapshot = options.snapshot ?? {
@@ -189,11 +188,11 @@ function loadPlugin(options = {}) {
         calls.registered = { ...(calls.registered ?? {}), spec, component }
       },
     },
-    settingsScope: {
-      bind(spec) {
+    configForms: {
+      /** The shared form for one Host entry, which is how the page reads and writes. */
+      get(entryId) {
         calls.binds += 1
-        calls.namespace = spec.namespace
-        calls.bindSpec = spec
+        calls.namespace = entryId
         return {
           getSnapshot: () => snapshot,
           subscribe: () => () => {},
@@ -203,6 +202,14 @@ function loadPlugin(options = {}) {
           },
           unset: () => Promise.resolve(),
           mutate: () => Promise.resolve(),
+        }
+      },
+      /** Keep a contribution alive only while the Host serves one of these entries. */
+      whileServed(namespaces, register) {
+        calls.watched = namespaces
+        const off = register(new Set(namespaces))
+        return () => {
+          if (typeof off === 'function') off()
         }
       },
     },
@@ -283,8 +290,8 @@ describe('client bundle: loading', () => {
       CONFIG_POLICIES,
       SCRIPT_CHECK_POLICIES,
     } = await import('../src/git-catalog.js')
-    const { calls } = activate()
-    const decode = calls.bindSpec.decode
+    const { exports } = activate()
+    const decode = exports.decodeSection
 
     for (const id of NATIVE_GIT_POLICIES) {
       assert.equal(decode({ nativeGitPolicy: id }).nativeGitPolicy, id, `nativeGitPolicy "${id}" must survive decoding`)
@@ -457,11 +464,11 @@ describe('client bundle: loading', () => {
   })
 
   it('declares exactly the services it reads, so activation waits for them', () => {
-    // This assertion used to require NO inject — it locked in the regression that
-    // made the page read-only. Without the declaration, apply can run before
-    // settingsScope is registered, and every control then renders disabled.
+    // The declaration is what orders activation against the services the page reads. A
+    // name that does not exist is worse than a missing one: the entry stays pending
+    // forever and the boot reports it did not activate.
     const { exports } = loadPlugin()
-    assert.deepEqual(exports.inject, ['slots', 'settingsScope'])
+    assert.deepEqual(exports.inject, ['slots', 'configForms'])
     assert.equal(typeof exports.apply, 'function', 'apply must still be exported')
   })
 
@@ -566,23 +573,25 @@ describe('client bundle: activation', () => {
     // The proxy throws on a property read, so a regression to `ctx.slots` fails
     // here with the field's exact error message.
     assert.doesNotThrow(() => exports.apply(ctx))
-    for (const name of ['slots', 'settingsScope']) {
+    for (const name of ['slots', 'configForms']) {
       assert.ok(calls.getCalls.includes(name), `apply must reach ${name} through ctx.get`)
     }
   })
 
-  it('supplies a decoder, which is what keeps the controls enabled', () => {
-    // Without a decoder the scope validates the section against the wire schema
-    // and reports undefined when that fails, so the status never reaches ready
-    // and every control renders disabled with no explanation.
-    const { calls } = activate()
-    assert.equal(typeof calls.bindSpec.decode, 'function', 'bind() must receive a decode function')
-    const decoded = calls.bindSpec.decode({
+  it('ships a tolerant decoder, which is what keeps the controls enabled', () => {
+    // The form service validates the section against the Host's schema and answers
+    // undefined when that fails; the page therefore decodes the snapshot itself instead
+    // of rendering every control disabled with no explanation.
+    const { exports } = activate()
+    assert.equal(typeof exports.decodeSection, 'function', 'the bundle must ship decodeSection')
+    const decoded = exports.decodeSection({
       enabled: ['status', 'commit'],
       approveMutating: false,
       dangerousKeyPolicy: 'neutralize',
       useHostCredentials: true,
       nativeGitPolicy: 'ask',
+      // The field the decoder used to drop: a stored `allow` then rendered as `ask`.
+      guardErrorPolicy: 'allow',
       pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
       bashPathMode: 'write-only',
       scanScripts: false,
@@ -603,6 +612,7 @@ describe('client bundle: activation', () => {
       dangerousKeyPolicy: 'neutralize',
       useHostCredentials: true,
       nativeGitPolicy: 'ask',
+      guardErrorPolicy: 'allow',
       pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
       bashPathMode: 'write-only',
       scanScripts: false,
@@ -619,9 +629,32 @@ describe('client bundle: activation', () => {
     })
   })
 
+  it('embeds a default for every editable field the Host declares', async () => {
+    // The page restates the Host's defaults at build time, because the browser cannot
+    // import the Host entry. This guard is what keeps the two in step: a field with no
+    // embedded default renders as undefined, which is exactly how a stored
+    // `guardErrorPolicy` of `allow` showed up as `ask`.
+    const { serializeCatalog } = await import('../scripts/build.mjs')
+    const { Config } = await import('../src/index.js')
+    const defaults = JSON.parse(serializeCatalog()).defaults
+    const fields = Object.keys(Config({}))
+    assert.ok(fields.length > 0, 'the Host schema must expose its fields')
+    /*
+     * `pathRules` is the one field whose embedded key differs: the Host schema deliberately
+     * gives it NO default (PITFALLS 35 — an absent key is what the row migration must see),
+     * while the page still needs the built-in row list to show before anything is stored.
+     * The projection carries it under its own name.
+     */
+    const projectedAs = new Map([['pathRules', 'protectionRows']])
+    for (const field of fields) {
+      const key = projectedAs.get(field) ?? field
+      assert.ok(key in defaults, `${field} must have an embedded default (as ${key})`)
+    }
+  })
+
   it('decodes a missing or malformed section instead of failing the page', () => {
-    const { calls } = activate()
-    const decode = calls.bindSpec.decode
+    const { exports } = activate()
+    const decode = exports.decodeSection
     for (const section of [undefined, null, [], 'nonsense', {}]) {
       const decoded = decode(section)
       assert.ok(Array.isArray(decoded.enabled), `decoding ${JSON.stringify(section)} must still yield a usable list`)
@@ -632,10 +665,11 @@ describe('client bundle: activation', () => {
     assert.equal(withJunk.approveMutating, true, 'a non-boolean falls back to the safe default')
   })
 
-  it('binds the namespace the Host half registers', () => {
+  it('asks the form service for the entry the Host half owns', () => {
     const { exports, ctx, calls } = loadPlugin()
     exports.apply(ctx)
-    assert.equal(calls.namespace, 'git-tool')
+    assert.equal(calls.namespace, 'tool-git')
+    assert.deepEqual(calls.watched, ['tool-git'], 'the section follows this entry, not the page load')
   })
 
   it('keeps the controls usable when the client does not read the namespace back', () => {
@@ -662,8 +696,8 @@ describe('client bundle: activation', () => {
   })
 
   it('disables the controls only when there is no settings service at all', () => {
-    // With slots but no settingsScope the page still registers, against an inert
-    // scope. That — and only that — is the disabled case.
+    // With slots but no configForms the page still registers, against an inert scope.
+    // That — and only that — is the disabled case.
     const { calls } = activate({ provide: ['slots'] })
     const page = renderPage(calls)
     const controls = controlRows(page)
@@ -684,7 +718,7 @@ describe('client bundle: activation', () => {
   })
 
   it('does not require the slots ledger to be present', () => {
-    const { exports, ctx } = loadPlugin({ provide: ['settingsScope'] })
+    const { exports, ctx } = loadPlugin({ provide: ['configForms'] })
     assert.doesNotThrow(() => exports.apply(ctx), 'a missing slot ledger must not fail the load')
   })
 
@@ -729,7 +763,7 @@ describe('client bundle: activation', () => {
     const { exports, ctx, calls } = loadPlugin()
     exports.apply(ctx)
     assert.equal(calls.registered.spec.name, 'settings.section')
-    assert.equal(calls.registered.spec.id, 'git-tool')
+    assert.equal(calls.registered.spec.id, 'tool-git')
   })
 
   it('registers the page behind an error boundary', () => {
@@ -781,7 +815,7 @@ describe('client bundle: declaration completeness', () => {
     // scan. Any of these forms in the shipped source is a regression.
     const forbidden = [
       'ctx.slots',
-      'ctx.settingsScope',
+      'ctx.configForms',
       'ctx.theme',
       'ctx.locale',
       'ctx.connection',

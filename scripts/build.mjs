@@ -44,6 +44,7 @@ import {
   TARGET_SCOPES,
   BASH_PATH_MODES,
   GUARD_ERROR_POLICIES,
+  DEFAULT_GUARD_ERROR_POLICY,
   DEFAULT_BASH_PATH_MODE,
   describeCatalog,
 } from '../src/git-catalog.js'
@@ -127,7 +128,7 @@ function operationCount(text) {
  *
  * @returns the JSON text to embed.
  */
-function serializeCatalog() {
+export function serializeCatalog() {
   const payload = {
     catalog: describeCatalog(),
     defaults: {
@@ -136,6 +137,7 @@ function serializeCatalog() {
       dangerousKeyPolicy: DEFAULT_CONFIG_POLICY,
       useHostCredentials: false,
       nativeGitPolicy: DEFAULT_NATIVE_GIT_POLICY,
+      guardErrorPolicy: DEFAULT_GUARD_ERROR_POLICY,
       /*
        * Every tier list the page offers, so the page and the Host cannot disagree about which
        * tiers exist or in what order. The page keeps only the wording; a tier present on one

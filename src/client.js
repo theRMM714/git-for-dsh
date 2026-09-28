@@ -24,9 +24,8 @@
  *    module graph. This module's `inject` export holds SERVICE names, which make
  *    activation wait until those services exist. Omitting a service you read from
  *    this module's `inject` fails the load ("cannot get property \"slots\"
- *    without inject"); omitting the whole export instead RACES — the page can run
- *    before `settingsScope` is registered, degrade to an inert scope, and render
- *    every control disabled.
+ *    without inject"). Naming a service that no longer exists is worse: the entry
+ *    stays pending forever and the boot reports it, which takes the whole page down.
  *
  * 2. A throw while the module is being EVALUATED fails that plugin's load, and
  *    in practice surfaced as a broken page. The factory body therefore runs
@@ -128,12 +127,6 @@ window.__ModuleLoader__.load({
        */
       const isKnownTier = (field, value, copy) => (CATALOG.defaults.tierIds?.[field] ?? copy.map((entry) => entry.id)).includes(value)
 
-      const GUARD_COPY = [
-        { id: 'deny', label: '禁止', hint: '直接拒绝，并提示改用 git_exec。' },
-        { id: 'ask', label: '询问', hint: '弹一次审批，由你当场决定。' },
-        { id: 'allow', label: '允许', hint: '不拦截，等于关闭这项保护。' },
-      ]
-
       /**
        * The native-git tiers.
        *
@@ -229,12 +222,6 @@ window.__ModuleLoader__.load({
        * "use git_exec" — the tool reads the credential itself, and that is exactly why
        * the read is unnecessary.
        */
-      const PATH_COPY = [
-        { id: 'deny', label: '禁止', hint: '直接拒绝；认证由 git_exec 内部完成，不需要读凭据。' },
-        { id: 'ask', label: '询问', hint: '弹一次审批，由你当场决定。' },
-        { id: 'allow', label: '允许', hint: '不拦截，等于关闭这项保护。' },
-      ]
-
       /**
        * The client services this half reads.
        *
@@ -243,12 +230,11 @@ window.__ModuleLoader__.load({
        * are not alternatives — a shipped plugin (`dsh-client-ui-settings-general`)
        * carries both.
        *
-       * Declaring them is what makes activation wait until they exist. Reading a
-       * service with `ctx.get` and no declaration compiles, but it races: if the
-       * settings domain has not registered `settingsScope` yet, the read answers
-       * undefined and the page degrades to controls nobody can use.
+       * Declaring them is what makes activation wait until they exist. A name that no
+       * longer exists is the WORSE failure: the entry then stays pending forever and the
+       * boot reports it did not activate, which takes the whole page down.
        */
-      const inject = ['slots', 'settingsScope']
+      const inject = ['slots', 'configForms']
 
       /**
        * This bundle's build id, substituted by `scripts/build.mjs`.
@@ -259,8 +245,8 @@ window.__ModuleLoader__.load({
        */
       const BUILD = __GIT_TOOL_BUILD__
 
-      /** Settings namespace, shared with the Host half. */
-      const NAMESPACE = 'git-tool'
+      /** The settings entry, shared with the Host half: its own profile row id. */
+      const NAMESPACE = 'tool-git'
 
       /** Copy for the three containment levels the page presents. */
       const TIER_HELP = {
@@ -364,30 +350,37 @@ window.__ModuleLoader__.load({
        * @param section - the wire section for the `git-tool` namespace.
        * @returns the value the page reads, never undefined for an object section.
        */
-      function decodeSection(section) {
-        if (section === null || typeof section !== 'object' || Array.isArray(section)) {
-          return {
-            enabled: [...CATALOG.defaults.enabled],
-            approveMutating: true,
-            dangerousKeyPolicy: CATALOG.defaults.dangerousKeyPolicy,
-            useHostCredentials: CATALOG.defaults.useHostCredentials === true,
-            nativeGitPolicy: CATALOG.defaults.nativeGitPolicy,
-            pluginEnabled: CATALOG.defaults.pluginEnabled !== false,
-            logEnabled: CATALOG.defaults.logEnabled !== false,
-            heartbeat: CATALOG.defaults.heartbeat === true,
-            logPath: CATALOG.defaults.logPath,
-            scriptCheckPolicy: CATALOG.defaults.scriptCheckPolicy,
-            targetScope: CATALOG.defaults.targetScope,
-            targetPaths: [...(CATALOG.defaults.targetPaths ?? [])],
-            scanScripts: CATALOG.defaults.scanScripts !== false,
-            sshCommand: CATALOG.defaults.sshCommand,
-            pathRules: builtinRows(CATALOG.defaults.protectionRows),
-            bashPathMode: CATALOG.defaults.bashPathMode ?? 'heuristic',
-            proxyPort: CATALOG.defaults.proxyPort,
-            proxyCommand: CATALOG.defaults.proxyCommand,
-          }
-        }
+      function fallbackSection() {
         return {
+          enabled: [...CATALOG.defaults.enabled],
+          approveMutating: true,
+          dangerousKeyPolicy: CATALOG.defaults.dangerousKeyPolicy,
+          useHostCredentials: CATALOG.defaults.useHostCredentials === true,
+          nativeGitPolicy: CATALOG.defaults.nativeGitPolicy,
+          guardErrorPolicy: CATALOG.defaults.guardErrorPolicy,
+          pluginEnabled: CATALOG.defaults.pluginEnabled !== false,
+          logEnabled: CATALOG.defaults.logEnabled !== false,
+          heartbeat: CATALOG.defaults.heartbeat === true,
+          logPath: CATALOG.defaults.logPath,
+          scriptCheckPolicy: CATALOG.defaults.scriptCheckPolicy,
+          targetScope: CATALOG.defaults.targetScope,
+          targetPaths: [...(CATALOG.defaults.targetPaths ?? [])],
+          scanScripts: CATALOG.defaults.scanScripts !== false,
+          sshCommand: CATALOG.defaults.sshCommand,
+          pathRules: builtinRows(CATALOG.defaults.protectionRows),
+          bashPathMode: CATALOG.defaults.bashPathMode ?? 'heuristic',
+          proxyPort: CATALOG.defaults.proxyPort,
+          proxyCommand: CATALOG.defaults.proxyCommand,
+        }
+      }
+
+      function decodeSection(section) {
+        if (section === null || typeof section !== 'object' || Array.isArray(section)) return fallbackSection()
+        // Spread the fallback FIRST: a field the overrides below forget then resolves to
+        // its default instead of rendering as undefined, which is how `guardErrorPolicy`
+        // silently showed `ask` for a stored `allow`.
+        return {
+          ...fallbackSection(),
           enabled: Array.isArray(section.enabled)
             ? section.enabled.filter((name) => typeof name === 'string')
             : [...CATALOG.defaults.enabled],
@@ -396,9 +389,8 @@ window.__ModuleLoader__.load({
             ? section.dangerousKeyPolicy
             : CATALOG.defaults.dangerousKeyPolicy,
           useHostCredentials: section.useHostCredentials === true,
-          // NATIVE_COPY, not GUARD_COPY: the native-git tiers have one more entry
-          // (restrict) than the credential-path ones, and checking the wrong table
-          // silently replaced a valid choice with the default.
+          // Validated against the ids the HOST declares, so a tier this build does not
+          // know is not quietly replaced by the client's own idea of the default.
           pluginEnabled: section.pluginEnabled !== false,
           logEnabled: section.logEnabled !== false,
           heartbeat: section.heartbeat === true,
@@ -419,6 +411,9 @@ window.__ModuleLoader__.load({
           nativeGitPolicy: isKnownTier('nativeGit', section.nativeGitPolicy, NATIVE_COPY)
             ? section.nativeGitPolicy
             : CATALOG.defaults.nativeGitPolicy,
+          guardErrorPolicy: isKnownTier('guardError', section.guardErrorPolicy, GUARD_ERROR_COPY)
+            ? section.guardErrorPolicy
+            : CATALOG.defaults.guardErrorPolicy,
           pathRules: Array.isArray(section.pathRules) && section.pathRules.length > 0
             ? section.pathRules.map((row) => ({
               path: String(row.path),
@@ -497,11 +492,11 @@ window.__ModuleLoader__.load({
         // Declared in `inject`, so this resolves before apply runs. The lookup
         // and the inert fallback are kept as a net: they should be unreachable,
         // and reaching one means the declaration and the runtime disagree.
-        const binder = service(ctx, 'settingsScope')
+        const forms = service(ctx, 'configForms')
         const scope =
-          binder !== undefined && typeof binder.bind === 'function'
-            ? binder.bind({ namespace: NAMESPACE, decode: decodeSection })
-            : inertScope('设置服务未挂载（settingsScope 服务缺失），页面只能显示当前状态。')
+          forms !== undefined && typeof forms.get === 'function'
+            ? forms.get(NAMESPACE)
+            : inertScope('设置表单服务未挂载（configForms 服务缺失），页面只能显示当前状态。')
 
         const GitSettingsPage = () => {
           const snapshot = useScopeSnapshot(scope)
@@ -1069,7 +1064,7 @@ window.__ModuleLoader__.load({
               ),
               row(
                 '守卫自身出错时',
-                segmented('guardErrorPolicy', GUARD_ERROR_COPY, value.guardErrorPolicy ?? CATALOG.defaults.guardErrorPolicy),
+                segmented('guardError', GUARD_ERROR_COPY, value.guardErrorPolicy ?? CATALOG.defaults.guardErrorPolicy),
                 '守卫是闸门的关键，所以它的缺陷不该隐形：默认把这次调用交给你裁决，而不是静默放行。',
               ),
               row(
@@ -1079,7 +1074,7 @@ window.__ModuleLoader__.load({
               ),
               row(
                 '原生 git',
-                segmented('nativeGitPolicy', NATIVE_COPY, value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy),
+                segmented('nativeGit', NATIVE_COPY, value.nativeGitPolicy ?? CATALOG.defaults.nativeGitPolicy),
               ),
               row(
                 '目标范围',
@@ -1109,7 +1104,7 @@ window.__ModuleLoader__.load({
                 : null,
               row(
                 '写入脚本时检查内容',
-                segmented('scriptCheckPolicy', SCRIPT_COPY, value.scriptCheckPolicy ?? CATALOG.defaults.scriptCheckPolicy),
+                segmented('scriptCheck', SCRIPT_COPY, value.scriptCheckPolicy ?? CATALOG.defaults.scriptCheckPolicy),
                 '写 shell 脚本（.sh/.bash 或 shebang）时先看内容，命中就拒绝写入，脚本不会生成。不读磁盘，所以不拖慢调用；'
                   + '由别的方式（heredoc、pull、其它工具）落地的脚本不会被预检。',
               ),
@@ -1282,7 +1277,7 @@ window.__ModuleLoader__.load({
               group('仓库配置审计'),
               row(
                 '出现危险配置键时',
-                segmented('dangerousKeyPolicy', POLICY_COPY, value.dangerousKeyPolicy ?? CATALOG.defaults.dangerousKeyPolicy),
+                segmented('config', POLICY_COPY, value.dangerousKeyPolicy ?? CATALOG.defaults.dangerousKeyPolicy),
               ),
             ),
             React.createElement(
@@ -1405,17 +1400,27 @@ window.__ModuleLoader__.load({
           // nothing that should fail this plugin's load over it.
           return
         }
-        slots.inject('settings.section', () =>
-          slots.register(
-            {
-              name: 'settings.section',
-              id: 'git-tool',
-              order: 30,
-              label: () => 'Git 工具',
-            },
-            () => React.createElement(Boundary, null, React.createElement(GitSettingsPage, null)),
-          ),
-        )
+        /** Publish the section; the form service hands back its own disposer. */
+        const publish = () =>
+          slots.inject('settings.section', () =>
+            slots.register(
+              {
+                name: 'settings.section',
+                id: NAMESPACE,
+                order: 30,
+                label: () => 'Git 工具',
+              },
+              () => React.createElement(Boundary, null, React.createElement(GitSettingsPage, null)),
+            ),
+          )
+
+        if (forms !== undefined && typeof forms.whileServed === 'function') {
+          // The form service knows which entries the Host currently serves, so the section
+          // appears exactly when this plugin's entry does.
+          ctx.effect(() => forms.whileServed([NAMESPACE], publish), 'tool-git: settings section')
+          return
+        }
+        publish()
       }
 
       /* @git-tool-css-begin */
@@ -1534,10 +1539,11 @@ window.__ModuleLoader__.load({
       // JSON input" defect lived, and it cannot regress if a test calls it.
       exports.classifyJsonResponse = classifyJsonResponse
       exports.rowIsDeletable = rowIsDeletable
+      // Exported for the suite: the tolerant decode is what keeps every control enabled,
+      // and it cannot regress if a test can call it.
+      exports.decodeSection = decodeSection
       exports.inject = inject
       exports.apply = apply
-      exports.message = message
-      exports.inertScope = inertScope
     } catch (error) {
       // Evaluation failed. Answer a plugin that does nothing, rather than letting
       // the throw fail this plugin's load and surface as a broken page.
