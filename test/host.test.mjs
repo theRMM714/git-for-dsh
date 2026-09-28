@@ -16,10 +16,13 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
-import { apply, applyUnguarded, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
+import { apply, applyUnguarded, Config, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
 import { fileStamp } from '../src/index.js'
 import { retiredKeys, guardFailureVerdict, inspectToolCall } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
+
+/** The editable fields of this plugin's own config, in schema order. */
+const CONFIG_FIELDS = Object.keys(Config({}))
 
 /**
  * Build a fake context that records everything the plugin touches.
@@ -27,7 +30,7 @@ import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
  * @returns the context plus the recorder arrays a test asserts against.
  */
 function fakeContext(options = {}) {
-  const recorded = { runs: [], approvals: [], sections: [], writes: [], starts: [], listeners: [], routes: [], requestedWorkdir: undefined }
+  const recorded = { runs: [], approvals: [], sections: [], writes: [], starts: [], listeners: [], routes: [], configured: [], requestedWorkdir: undefined }
   // Diagnostics off by default in tests: the log's default path is the operator's real
   // file, and the heartbeat writes to it on a timer — which is how a test run once put 60
   // heartbeat lines into their log. A test that wants either passes it explicitly.
@@ -46,16 +49,17 @@ function fakeContext(options = {}) {
   // document, so the schema default would otherwise fill 'workspace' and refuse every call
   // that drives the tool from an arbitrary workdir to exercise the other gates.
   if (!('targetScope' in rawSettings)) settingsValue.targetScope = 'unrestricted'
-  const listeners = new Set()
-  // Mirrors the REAL host-side SettingsScope: get/watch/update/replace. A
-  // fixture with subscribe()/set() would let a bug pass, because the settings
-  // service does not have those methods.
-  const scope = {
-    get: () => settingsValue,
-    watch(listener) {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
+  /*
+   * The loader resolves this entry's config through the schema and hands every editable
+   * field back as a runtime reference. The plugin reads those references on demand, so a
+   * settings edit is just a new value behind them — there is no notification to mirror,
+   * which is what the real loader does too.
+   */
+  const config = {}
+  for (const field of CONFIG_FIELDS) config[field] = { get: () => settingsValue[field] }
+  /** Fold one more layer into this entry's config, the way a test's `entry` does. */
+  const patchConfig = (next) => {
+    settingsValue = { ...settingsValue, ...next }
   }
   const tools = {
     registered: [],
@@ -77,26 +81,16 @@ function fakeContext(options = {}) {
           // it would silently test the wrong reason text.
           ...(options.approval.overrideOf === undefined ? {} : { overrideOf: options.approval.overrideOf }),
         }
-  // The settings service hands back the namespace scope; the fake returns the
-  // scope object the recorder watches.
+  /*
+   * The settings service as this plugin reaches it: a presentation policy to declare and a
+   * describe face to read. Writes go through the configuration editor, not through here.
+   */
   const settings = {
-    written: [],
-    update: (ns, patch) => {
-      settings.written.push({ ns, patch })
-      return Promise.resolve()
+    configure(presentation, owner) {
+      recorded.configured.push({ presentation, owner })
+      return () => {}
     },
-    register: (ns, schema) => {
-      settings.registeredNamespace = ns
-      // Real providers resolve AT registration: schema defaults over the base.
-      settingsValue = schema(settingsValue)
-      return scope
-    },
-    update: (ns, patch) => {
-      recorded.writes.push({ ns, patch })
-      settingsValue = { ...settingsValue, ...patch }
-      for (const listener of listeners) listener(settingsValue)
-      return Promise.resolve()
-    },
+    describe: () => options.describe ?? [],
   }
   /**
    * Services this fixture exposes, keyed as Cordis would serve them.
@@ -128,6 +122,25 @@ function fakeContext(options = {}) {
       on(event, listener) {
         recorded.listeners.push({ event, listener })
         return () => {}
+      },
+      /** The fiber the settings policy is declared against. */
+      fiber: { entry: { id: 'tool-git' } },
+      /**
+       * The optional child scope the plugin reaches `settings` through. It runs only when
+       * the service exists, exactly like the loader's own gating.
+       */
+      inject(names, callback) {
+        const child = (service) => ({
+          ...service,
+          effect(cb) {
+            const disposer = cb()
+            return () => {
+              if (typeof disposer === 'function') disposer()
+            }
+          },
+        })
+        if (names.includes('settings') && services.settings !== undefined) callback(child({ settings: services.settings }))
+        if (names.includes('webServer') && services.webServer !== undefined) callback(child({ webServer: services.webServer }))
       },
       effect(callback) {
         const disposer = callback()
@@ -204,21 +217,20 @@ function fakeContext(options = {}) {
       },
     },
   )
-  /** Change the value the settings scope resolves, then notify subscribers. */
+  /** Replace the value the config references resolve, as a settings edit would. */
   const setSettings = (next) => {
     settingsValue = next
-    for (const listener of listeners) listener(next)
   }
-  return { ctx, recorded, setSettings, settings }
+  return { ctx, recorded, setSettings, settings, config, patchConfig }
 }
 
 /** Register the plugin against a fake context and return the `git_exec` definition. */
 function mount(options) {
-  const { ctx, recorded, setSettings, settings } = fakeContext(options)
-  // The scope is open by default here: this fixture drives the tool from arbitrary
-  // workdirs to exercise the other gates. A test that sets targetScope itself still wins,
-  // because the entry is spread first and the stored settings are read over it.
-  applyUnguarded(ctx, { targetScope: 'unrestricted', ...(options?.entry ?? {}) })
+  const { ctx, recorded, setSettings, settings, config, patchConfig } = fakeContext(options)
+  // A test's `entry` is this entry's own config — the same document a settings edit writes,
+  // so it is folded in rather than layered underneath.
+  patchConfig(options?.entry ?? {})
+  applyUnguarded(ctx, config)
   const definition = ctx.tools.registered.find((tool) => tool.name === 'git_exec')
   assert.ok(definition !== undefined, 'git_exec must be registered')
   return { definition, recorded, setSettings, settings }
@@ -298,21 +310,22 @@ describe('host artifact: every host module is present', () => {
   })
 })
 
-describe('host plugin: the settings namespace', () => {
-  it('registers the git-tool namespace, which is what makes the page writable', () => {
-    // The read-only settings page was exactly this failing: the namespace was
-    // never registered, so the client saw no writable section and disabled every
-    // control. Nothing else in the plugin errors in that state, which is why it
-    // needs its own assertion.
-    const { settings } = mount()
-    assert.equal(settings.registeredNamespace, 'git-tool')
+describe('host plugin: the settings entry', () => {
+  it('declares its own form policy, which is what lets the page own the controls', () => {
+    // A page that never declares the policy gets an auto-generated form beside its own
+    // controls. Nothing else in the plugin errors in that state, so it needs its own
+    // assertion.
+    const { recorded } = mount()
+    assert.equal(recorded.configured.length, 1)
+    assert.deepEqual(recorded.configured[0].presentation, { auto: false })
   })
 
-  it('does not register the namespace when no settings service exists', () => {
-    // The other half of the rule: a composition without the service must still
-    // activate and simply keep the entry policy, not fail.
-    const { settings } = mount({ withSettings: false })
-    assert.equal(settings.registeredNamespace, undefined)
+  it('activates without a settings service', () => {
+    // A composition without the service must still register the tool and keep this
+    // entry's own config as the whole policy.
+    const { definition, recorded } = mount({ withSettings: false })
+    assert.notEqual(definition, undefined)
+    assert.deepEqual(recorded.configured, [])
   })
 })
 
@@ -658,7 +671,7 @@ describe('host plugin: the configuration health', () => {
   it('reports the keys the current schema no longer declares', () => {
     // The user layer is what the operator actually wrote, so a key there with no declaration
     // in this schema is a leftover from a setting this plugin no longer has.
-    const descriptor = (user) => ({ describe: () => [{ ns: 'git-tool', user }] })
+    const descriptor = (user) => ({ describe: () => [{ ns: 'tool-git', user }] })
     assert.deepEqual(retiredKeys(descriptor({ pathRules: [], retiredThing: 1 })), ['retiredThing'])
     assert.deepEqual(retiredKeys(descriptor({ pathRules: [], bashPathMode: 'heuristic' })), [])
     assert.deepEqual(retiredKeys(descriptor({ a: 1, b: 2 })), ['a', 'b'], 'sorted, so the list is stable')
@@ -667,7 +680,7 @@ describe('host plugin: the configuration health', () => {
   it('reports nothing rather than inventing a fault', () => {
     // A service that cannot answer is not a broken configuration. The settings service is
     // optional, so this half must survive without one.
-    const descriptor = (user) => ({ describe: () => [{ ns: 'git-tool', user }] })
+    const descriptor = (user) => ({ describe: () => [{ ns: 'tool-git', user }] })
     assert.deepEqual(retiredKeys(descriptor(undefined)), [])
     assert.deepEqual(retiredKeys(descriptor(null)), [])
     assert.deepEqual(retiredKeys({}), [], 'no describe to ask')

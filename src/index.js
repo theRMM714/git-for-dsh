@@ -71,21 +71,23 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
 
-export const name = 'git-tool'
+/** Loader entry name; also the settings entry this plugin owns. */
+export const name = 'tool-git'
 
 /**
  * Hard dependencies.
  *
- * `settings` belongs here even though the code reaches it with `ctx.get` and
- * tolerates its absence: an undeclared service read answers `undefined`, so
- * leaving it out silently skips the namespace registration and turns the settings
- * page READ-ONLY with no error anywhere. Declaring it makes the resolution
- * explicit, and Cordis parks the plugin rather than letting it run half-wired.
+ * `settings` is NOT declared: it is reached through an optional child scope and
+ * `ctx.get`, so a composition without one still activates and keeps this entry's own
+ * config as the whole policy.
  */
-export const inject = ['tools', 'shell', 'systemPrompt', 'settings']
+export const inject = ['tools', 'shell', 'systemPrompt']
 
-/** Namespace holding this tool's durable allowlist. */
-const NAMESPACE = 'git-tool'
+/**
+ * The settings entry this plugin owns: its own profile row id, which is the key the
+ * settings service addresses a form by.
+ */
+const NAMESPACE = 'tool-git'
 
 /** Risk tiers that a per-call approval covers when `approveMutating` is on. */
 const APPROVAL_TIERS = new Set([RISK.write, RISK.remote])
@@ -94,8 +96,15 @@ const APPROVAL_TIERS = new Set([RISK.write, RISK.remote])
 const DEFAULT_TIMEOUT_MS = 120_000
 const REMOTE_TIMEOUT_MS = 300_000
 
-/** Schema of the durable allowlist. */
-export const Config = z.object({
+/**
+ * The durable allowlist's fields.
+ *
+ * Every field is editable from this plugin's own settings page, and the settings
+ * service projects only fields marked `.volatile()`. Marking them in one place means a
+ * field added later cannot be forgotten: an entry whose schema has no volatile field is
+ * skipped by `describe()`, and its settings page then silently never appears.
+ */
+const CONFIG_FIELDS = {
   /**
    * Operations the model may invoke.
    *
@@ -328,7 +337,15 @@ export const Config = z.object({
     .string()
     .default('')
     .description('Shell command that starts your proxy on the port above, run once on the first remote operation. Leave empty to start it yourself.'),
-})
+}
+
+/** Schema of the durable allowlist; every field is projected to the settings form. */
+export const Config = z.object(
+  Object.fromEntries(Object.entries(CONFIG_FIELDS).map(([key, field]) => [key, field.volatile()])),
+)
+
+/** The config members {@link readConfig} unfolds, in schema order. */
+const CONFIG_FIELD_NAMES = Object.keys(CONFIG_FIELDS)
 
 /** The composition-default policy: the read tier, approval on, audit at its strictest. */
 export const DEFAULT_CONFIG = Object.freeze({
@@ -460,7 +477,7 @@ function promptText(enabled) {
 }
 
 /**
- * Register the `git_exec` tool, its settings namespace, and its prompt section.
+ * Register the `git_exec` tool, its settings entry, and its prompt section.
  *
  * A failure here is CONTAINED, not propagated: this plugin deliberately runs
  * outside the sandbox, so a partial registration would leave a tool that is
@@ -471,15 +488,15 @@ function promptText(enabled) {
  * working without it.
  *
  * @param ctx - the plugin context.
- * @param entry - composition entry config, used as the settings base layer.
+ * @param config - the resolved config for this entry.
  */
-export function apply(ctx, entry = {}) {
+export function apply(ctx, config = {}) {
   try {
-    setup(ctx, entry)
+    setup(ctx, config)
   } catch (error) {
     const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
     console.error(
-      `git-tool: activation failed, so the git_exec tool is NOT available and every git operation is refused. ` +
+      `tool-git: activation failed, so the git_exec tool is NOT available and every git operation is refused. ` +
         `Fix this plugin or disable its row (set "disabled: !!js process.env.DSH_GIT_TOOL_DISABLED === '1'" on the ` +
         `tool-git row) and restart dsh. Cause: ${detail}`,
     )
@@ -495,43 +512,109 @@ export function apply(ctx, entry = {}) {
  * Production always goes through {@link apply}.
  *
  * @param ctx - the plugin context.
- * @param entry - composition entry config, used as the settings base layer.
+ * @param config - the resolved config for this entry.
  */
-export function applyUnguarded(ctx, entry = {}) {
-  setup(ctx, entry)
+export function applyUnguarded(ctx, config = {}) {
+  setup(ctx, config)
+}
+
+/** Whether one config member is a runtime reference. */
+function isReference(value) {
+  return value !== null && typeof value === 'object' && typeof value.get === 'function'
 }
 
 /**
- * Bind the settings scope, with the composition entry as the fallback policy.
+ * Unfold this entry's resolved config into plain values.
+ *
+ * A member is a reference under the loader, which is what makes a settings edit visible
+ * without a restart; a plain value is accepted too, so a composition entry and a test
+ * fixture read the same way.
+ *
+ * @param config - the resolved config for this entry.
+ * @returns plain values for every known field.
+ */
+export function readConfig(config) {
+  const source = config !== null && typeof config === 'object' ? config : {}
+  const values = {}
+  for (const name of CONFIG_FIELD_NAMES) {
+    const value = source[name]
+    values[name] = isReference(value) ? value.get() : value
+  }
+  return values
+}
+
+/** Whether two unfolds carry the same references; the cache key for the policy below. */
+function sameConfig(next, previous) {
+  if (previous === undefined) return false
+  for (const name of CONFIG_FIELD_NAMES) if (next[name] !== previous[name]) return false
+  return true
+}
+
+/**
+ * Bind the policy to this entry's own configuration.
+ *
+ * The config is read on demand rather than cached at activation: a settings edit
+ * replaces the reference's value, and the gates must see that on the next call. Folding
+ * is memoized by the identity of those values so the guard's hot path — every tool call
+ * — does not re-normalize an unchanged policy.
+ *
  * @param ctx - the plugin context.
- * @param base - the composition defaults for this namespace.
+ * @param config - the resolved config for this entry.
  * @returns the mutable state holder the gates read.
  */
-function bindPolicy(ctx, base) {
-  const state = { current: normalizePolicy(base), update: undefined }
-  // Declared: read the service directly. The optional read stays as a fallback so
-  // this half also works in a composition without one (a headless test boot, for
-  // instance), where the composition entry is then the whole policy.
-  const settings = ctx.settings ?? ctx.get('settings')
-  if (settings === undefined) return state
-  const scope = settings.register(NAMESPACE, Config, { base, applies: 'live' })
-  ctx.effect(() => {
-    state.current = normalizePolicy(scope.get())
-    const off = scope.watch((value) => {
-      state.current = normalizePolicy(value)
-    })
-    return () => {
-      if (typeof off === 'function') off()
+function bindPolicy(ctx, config) {
+  let cachedRaw
+  let cachedPolicy = normalizePolicy(readConfig(config))
+  const readCurrent = () => {
+    const raw = readConfig(config)
+    if (!sameConfig(raw, cachedRaw)) {
+      cachedRaw = raw
+      cachedPolicy = normalizePolicy(raw)
     }
-  }, 'git-tool: settings scope')
-  state.update = (patch) => settings.update(NAMESPACE, patch)
+    return cachedPolicy
+  }
+
   /*
-   * The configuration route runs in a scope that holds this object but not the service, so the
-   * two calls it needs are exposed here, where the service is in hand. The reset is absent when
-   * the provider cannot replace a section, and the route reports that as unsupported.
+   * The gates read `policy.current`, so it stays a property; the getter is what keeps
+   * them reading the live value.
    */
-  state.retiredKeys = () => retiredKeys(settings)
-  state.resetSection = typeof settings.replace === 'function' ? () => settings.replace(NAMESPACE, {}) : undefined
+  const state = {
+    get current() {
+      return readCurrent()
+    },
+    update: undefined,
+    retiredKeys: undefined,
+    resetSection: undefined,
+  }
+
+  /*
+   * This plugin draws its own settings page, so it asks the settings service not to
+   * generate one from the schema. The child scope is optional: a profile without a
+   * settings service keeps running with this entry's own config as the whole policy.
+   */
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['settings'], (child) => {
+      child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
+    })
+  }
+
+  const settings = typeof ctx.get === 'function' ? ctx.get('settings') : undefined
+  if (settings !== undefined && typeof settings.describe === 'function') {
+    state.retiredKeys = () => retiredKeys(settings)
+  }
+
+  /*
+   * The configuration routes run in a scope that holds this object but not the service,
+   * so the two calls they need are exposed here. Both are absent when this profile has no
+   * configuration editor, and the route reports that as unsupported rather than
+   * pretending to have written something.
+   */
+  const editor = typeof ctx.get === 'function' ? ctx.get('configEditor') : undefined
+  const entry = ctx.fiber?.entry
+  if (editor !== undefined && typeof editor.edit === 'function' && entry !== undefined) {
+    state.update = (patch) => editor.edit(entry, (current) => ({ ...current, ...patch }))
+    state.resetSection = () => editor.edit(entry, () => ({}))
+  }
   return state
 }
 
@@ -650,7 +733,7 @@ function normalizePolicy(value) {
 /**
  * The real activation: settings scope, tool, prompt section, catalog RPC.
  * @param ctx - the plugin context.
- * @param entry - composition entry config, used as the settings base layer.
+ * @param config - the resolved config for this entry.
  */
 /**
  * Make sure the operator's proxy is running and return the environment that points
@@ -1522,14 +1605,8 @@ function targetRefusal(policy, target, workspace) {
     + '若确实需要在别处执行，请把设置里的「目标范围」改为「指定路径」或「无限制」。'
 }
 
-function setup(ctx, entry = {}) {
-  const base = { ...DEFAULT_CONFIG, ...entry }
-  // The HOST-side settings scope is a narrower API than the browser one: it
-  // exposes `get()`, `watch()`, `update()`, and `replace()` — not
-  // `subscribe()`/`set()`. Reads go through `get()`, and a change is a namespace
-  // `update`, which is what makes the value durable in the profile's
-  // `settings.yaml`.
-  const policy = bindPolicy(ctx, base)
+function setup(ctx, config = {}) {
+  const policy = bindPolicy(ctx, config)
   /**
    * This activation's proxy lifecycle.
    *
@@ -1543,164 +1620,165 @@ function setup(ctx, entry = {}) {
    * Same-origin, so the page's own fetch reaches it; optional, because a profile
    * without a web server simply has no page to serve the button to.
    */
-  const webServer = ctx.get('webServer')
-  if (webServer !== undefined && typeof webServer.register === 'function') {
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: PROXY_CHECK_PATH,
-      handler: async (req, res) => {
-        /** One JSON response, with the headers a fetch from the page needs. */
-        const respond = (payload, status = 200) => {
-          res.statusCode = status
-          res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.setHeader('cache-control', 'no-store')
-          res.end(JSON.stringify(payload))
-        }
-        try {
-          const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-          const port = Number.parseInt(url.searchParams.get('port') ?? '', 10)
-          if (!Number.isInteger(port) || port < 1 || port > 65535) {
-            respond({ error: '端口无效：需要 1-65535 之间的整数。' }, 400)
-            return
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['webServer'], (webCtx) => {
+      webCtx.effect(() => webCtx.webServer.register({
+        kind: 'exact',
+        path: PROXY_CHECK_PATH,
+        handler: async (req, res) => {
+          /** One JSON response, with the headers a fetch from the page needs. */
+          const respond = (payload, status = 200) => {
+            res.statusCode = status
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.setHeader('cache-control', 'no-store')
+            res.end(JSON.stringify(payload))
           }
-          const current = policy.current
-          respond(await buildProxyReport(port, current.proxyCommand.trim().length > 0, current.proxyPort === port))
-        } catch (error) {
-          respond({ error: error instanceof Error ? error.message : String(error) }, 500)
-        }
-      },
-    }), 'git-tool: proxy check route')
-
-    /*
-     * The log routes. Same-origin, like the port check: the page has no other way to
-     * reach the file, and the operator asked to read and clear it from the settings UI.
-     */
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: LOG_PATH,
-      handler: async (req, res) => {
-        /** One JSON response, with the headers a fetch from the page needs. */
-        const respond = (payload, status = 200) => {
-          res.statusCode = status
-          res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.setHeader('cache-control', 'no-store')
-          res.end(JSON.stringify(payload))
-        }
-        try {
-          const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-          const path = policy.current.logPath.length > 0 ? policy.current.logPath : defaultLogPath()
-
-          if (url.searchParams.get('action') === 'clear') {
-            await writeFile(path, '')
-            // Logged AFTER clearing, so the file the operator is looking at starts with
-            // the record of who emptied it.
-            log.line('log.cleared', { path })
-            respond({ path, cleared: true, lines: [] })
-            return
-          }
-
-          const requested = Number.parseInt(url.searchParams.get('tail') ?? '', 10)
-          const wanted = Number.isInteger(requested) && requested > 0 && requested <= LOG_TAIL_LINES
-            ? requested
-            : 200
-          /*
-           * Only a missing file stays quiet: that is the normal state before the first line.
-           * Any OTHER read failure is reported, because an unreadable log and an empty one
-           * look identical to the operator otherwise.
-           */
-          let text = ''
-          let exists = true
           try {
-            text = await readFile(path, 'utf8')
+            const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+            const port = Number.parseInt(url.searchParams.get('port') ?? '', 10)
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+              respond({ error: '端口无效：需要 1-65535 之间的整数。' }, 400)
+              return
+            }
+            const current = policy.current
+            respond(await buildProxyReport(port, current.proxyCommand.trim().length > 0, current.proxyPort === port))
           } catch (error) {
-            const code = error !== null && typeof error === 'object' ? error.code : undefined
-            if (code !== 'ENOENT') {
-              respond({
-                path,
-                lines: [],
-                exists: true,
-                error: `读不了日志文件（${code ?? (error instanceof Error ? error.message : String(error))}）`,
-              })
+            respond({ error: error instanceof Error ? error.message : String(error) }, 500)
+          }
+        },
+      }), 'tool-git: proxy check route')
+  
+      /*
+       * The log routes. Same-origin, like the port check: the page has no other way to
+       * reach the file, and the operator asked to read and clear it from the settings UI.
+       */
+      webCtx.effect(() => webCtx.webServer.register({
+        kind: 'exact',
+        path: LOG_PATH,
+        handler: async (req, res) => {
+          /** One JSON response, with the headers a fetch from the page needs. */
+          const respond = (payload, status = 200) => {
+            res.statusCode = status
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.setHeader('cache-control', 'no-store')
+            res.end(JSON.stringify(payload))
+          }
+          try {
+            const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+            const path = policy.current.logPath.length > 0 ? policy.current.logPath : defaultLogPath()
+  
+            if (url.searchParams.get('action') === 'clear') {
+              await writeFile(path, '')
+              // Logged AFTER clearing, so the file the operator is looking at starts with
+              // the record of who emptied it.
+              log.line('log.cleared', { path })
+              respond({ path, cleared: true, lines: [] })
               return
             }
-            exists = false
+  
+            const requested = Number.parseInt(url.searchParams.get('tail') ?? '', 10)
+            const wanted = Number.isInteger(requested) && requested > 0 && requested <= LOG_TAIL_LINES
+              ? requested
+              : 200
+            /*
+             * Only a missing file stays quiet: that is the normal state before the first line.
+             * Any OTHER read failure is reported, because an unreadable log and an empty one
+             * look identical to the operator otherwise.
+             */
+            let text = ''
+            let exists = true
+            try {
+              text = await readFile(path, 'utf8')
+            } catch (error) {
+              const code = error !== null && typeof error === 'object' ? error.code : undefined
+              if (code !== 'ENOENT') {
+                respond({
+                  path,
+                  lines: [],
+                  exists: true,
+                  error: `读不了日志文件（${code ?? (error instanceof Error ? error.message : String(error))}）`,
+                })
+                return
+              }
+              exists = false
+            }
+            const recent = text.slice(-LOG_TAIL_BYTES)
+            const lines = recent.split('\n').filter((line) => line.length > 0).slice(-wanted)
+            respond({
+              path,
+              lines,
+              exists,
+              truncated: text.length > LOG_TAIL_BYTES,
+              enabled: policy.current.logEnabled !== false,
+            })
+          } catch (error) {
+            respond({ error: error instanceof Error ? error.message : String(error) }, 500)
           }
-          const recent = text.slice(-LOG_TAIL_BYTES)
-          const lines = recent.split('\n').filter((line) => line.length > 0).slice(-wanted)
-          respond({
-            path,
-            lines,
-            exists,
-            truncated: text.length > LOG_TAIL_BYTES,
-            enabled: policy.current.logEnabled !== false,
-          })
-        } catch (error) {
-          respond({ error: error instanceof Error ? error.message : String(error) }, 500)
-        }
-      },
-    }), 'git-tool: log route')
-
-    /*
-     * Which ssh programs exist. A click, not a per-call probe: see the log-route comment
-     * above, and entry 29 for why that distinction is load-bearing.
-     */
-    /*
-     * The configuration health check and the one-click reset. Same-origin, like the routes
-     * above: the page has no other way to ask. GET reports whether the stored user layer
-     * still carries keys this schema no longer knows; POST writes an empty section, which
-     * falls back to the base and the defaults — the reset path that removes them all.
-     */
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: CONFIG_CHECK_PATH,
-      handler: async (req, res) => {
-        const respond = (payload, status = 200) => {
-          res.statusCode = status
-          res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.setHeader('cache-control', 'no-store')
-          res.end(JSON.stringify(payload))
-        }
-        try {
-          if (req.method === 'POST') {
-            if (typeof policy.resetSection !== 'function') {
-              respond({ error: '这个宿主没有提供整段替换能力，无法一键初始化' }, 501)
+        },
+      }), 'tool-git: log route')
+  
+      /*
+       * Which ssh programs exist. A click, not a per-call probe: see the log-route comment
+       * above, and entry 29 for why that distinction is load-bearing.
+       */
+      /*
+       * The configuration health check and the one-click reset. Same-origin, like the routes
+       * above: the page has no other way to ask. GET reports whether the stored user layer
+       * still carries keys this schema no longer knows; POST writes an empty section, which
+       * falls back to the base and the defaults — the reset path that removes them all.
+       */
+      webCtx.effect(() => webCtx.webServer.register({
+        kind: 'exact',
+        path: CONFIG_CHECK_PATH,
+        handler: async (req, res) => {
+          const respond = (payload, status = 200) => {
+            res.statusCode = status
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.setHeader('cache-control', 'no-store')
+            res.end(JSON.stringify(payload))
+          }
+          try {
+            if (req.method === 'POST') {
+              if (typeof policy.resetSection !== 'function') {
+                respond({ error: '这个宿主没有提供整段替换能力，无法一键初始化' }, 501)
+                return
+              }
+              await policy.resetSection()
+              respond({ ok: true, retired: [] })
               return
             }
-            await policy.resetSection()
-            respond({ ok: true, retired: [] })
-            return
+            respond({ retired: policy.retiredKeys() })
+          } catch (error) {
+            respond({ error: error instanceof Error ? error.message : String(error) }, 500)
           }
-          respond({ retired: policy.retiredKeys() })
-        } catch (error) {
-          respond({ error: error instanceof Error ? error.message : String(error) }, 500)
-        }
-      },
-    }), 'git-tool: config check route')
-
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: SSH_CHECK_PATH,
-      handler: (req, res) => {
-        const respond = (payload, status = 200) => {
-          res.statusCode = status
-          res.setHeader('content-type', 'application/json; charset=utf-8')
-          res.setHeader('cache-control', 'no-store')
-          res.end(JSON.stringify(payload))
-        }
-        try {
-          const scan = sshCandidateScan()
-          respond({
-            current: policy.current.sshCommand,
-            expected: DEFAULT_SSH_COMMAND,
-            candidates: scan.rows,
-            checked: scan.checked,
-            windowsMounts: scan.windowsMounts,
-          })
-        } catch (error) {
-          respond({ error: error instanceof Error ? error.message : String(error) }, 500)
-        }
-      },
-    }), 'git-tool: ssh check route')
+        },
+      }), 'tool-git: config check route')
+  
+      webCtx.effect(() => webCtx.webServer.register({
+        kind: 'exact',
+        path: SSH_CHECK_PATH,
+        handler: (req, res) => {
+          const respond = (payload, status = 200) => {
+            res.statusCode = status
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.setHeader('cache-control', 'no-store')
+            res.end(JSON.stringify(payload))
+          }
+          try {
+            const scan = sshCandidateScan()
+            respond({
+              current: policy.current.sshCommand,
+              expected: DEFAULT_SSH_COMMAND,
+              candidates: scan.rows,
+              checked: scan.checked,
+              windowsMounts: scan.windowsMounts,
+            })
+          } catch (error) {
+            respond({ error: error instanceof Error ? error.message : String(error) }, 500)
+          }
+        },
+      }), 'tool-git: ssh check route')
+    })
   }
 
   /**
