@@ -20,6 +20,7 @@ import { apply, applyUnguarded, Config, DEFAULT_CONFIG, inject as pluginInject }
 import { fileStamp } from '../src/index.js'
 import { retiredKeys, guardFailureVerdict, inspectToolCall } from '../src/index.js'
 import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
+import { SHELL_SEAM } from '../src/shell-driver.js'
 import { ROUTES } from '../src/routes.js'
 
 /** The editable fields of this plugin's own config, in schema order. */
@@ -150,57 +151,69 @@ function fakeContext(options = {}) {
         }
       },
       tools,
-    shell: {
-      resolve(request) {
-        // Mirrors the real executor: an omitted workdir falls back to the
-        // PROCESS cwd, which is why the plugin must not omit it for a real
-        // session. `requestedWorkdir` records what the CALLER asked for.
-        recorded.requestedWorkdir = request.workdir
-        return { ...request, workdir: request.workdir ?? '/process/cwd', timeoutMs: request.timeoutMs ?? 1000, stdoutMaxBytes: 1e6 }
-      },
-      /**
-       * Background start, which is how the plugin launches the operator's proxy.
-       * The test supplies `onStart` to open a real listener, so the plugin's own
-       * port wait is exercised rather than stubbed.
+      /*
+       * The fake implements the REAL seam — `resolve` + `execute`, with the process handle
+       * carrying `result()` — and nothing else.
+       *
+       * The Proxy is the point: the plugin was once written against an invented
+       * `run()`/`start()` pair, and because this fixture offered that same invented pair,
+       * the whole suite stayed green while every git call in production died with
+       * "ctx.shell.run is not a function". Now any property outside the seam throws, so a
+       * call site that drifts from the harness contract fails here instead of in the field.
        */
-      start(spec) {
-        recorded.starts.push(spec.command)
-        const stop = options.onStart === undefined ? () => {} : options.onStart(spec)
-        return {
-          kill() {
-            stop()
-          },
-          readOutput: () => ({ delta: '', lossy: false }),
-          done: new Promise(() => {}),
-        }
-      },
-      run(spec) {
-        recorded.runs.push(spec)
-        // The repository-config audit issues its own shell call, answered here from
-        // the test's own knobs so a test can arm the configuration it wants.
-        if (AUDIT_COMMAND.test(spec.command)) {
-          const keys = options.configKeys ?? []
-          return Promise.resolve({
-            exitCode: options.configExitCode ?? 0,
-            signal: null,
-            timedOut: false,
-            timeoutMs: spec.timeoutMs,
-            stdout: { text: keys.join('\u0000'), truncated: false },
-            stderr: { text: '', truncated: false },
-          })
-        }
-        return Promise.resolve(
-          options.runResult ?? {
-            exitCode: 0,
-            signal: null,
-            timedOut: false,
-            timeoutMs: spec.timeoutMs,
-            stdout: { text: 'ok\n', truncated: false },
-            stderr: { text: '', truncated: false },
-          },
-        )
-      },
-    },
+      shell: new Proxy({
+        resolve(request) {
+          // Mirrors the real executor: an omitted workdir falls back to the
+          // PROCESS cwd, which is why the plugin must not omit it for a real
+          // session. `requestedWorkdir` records what the CALLER asked for.
+          recorded.requestedWorkdir = request.workdir
+          // Mirrors `clampTimeout`: a non-positive timeout is REJECTED, not read as
+          // "no timeout" — the proxy launch once sent 0 and would have thrown here.
+          if (request.timeoutMs !== undefined && (!Number.isFinite(request.timeoutMs) || request.timeoutMs <= 0)) {
+            throw new Error('timeoutMs must be a positive finite number')
+          }
+          return {
+            ...request,
+            workdir: request.workdir ?? '/process/cwd',
+            timeoutMs: request.timeoutMs ?? 1000,
+            onExpiry: request.onExpiry ?? 'kill',
+            stdoutMaxBytes: 1e6,
+          }
+        },
+        /**
+         * The single execution method, exactly as the harness declares it. The fixture
+         * separates the two shapes by intent: `onExpiry: 'none'` is the background launch
+         * (the operator's proxy, whose handle the plugin keeps), anything else is a
+         * foreground command whose `result()` the plugin awaits.
+         */
+        execute(spec) {
+          if (spec.onExpiry === 'none') {
+            recorded.starts.push(spec.command)
+            const stop = options.onStart === undefined ? () => {} : options.onStart(spec)
+            return Promise.resolve({
+              kill() {
+                stop()
+              },
+              readOutput: () => ({ delta: '', lossy: false }),
+              done: new Promise(() => {}),
+              // A process that outlives the call never settles its result.
+              result: () => new Promise(() => {}),
+            })
+          }
+          recorded.runs.push(spec)
+          return Promise.resolve({ result: () => Promise.resolve(shellAnswer(options, spec)) })
+        },
+      }, {
+        get(target, prop) {
+          // A Promise-like probe is a legitimate read of any object; everything else
+          // outside the seam is a drift this fixture must not hide.
+          if (prop === 'then') return undefined
+          if (typeof prop === 'string' && !(prop in target)) {
+            throw new Error(`the shell service has no ${prop}(); its seam is ${Object.keys(target).join(' + ')}`)
+          }
+          return Reflect.get(target, prop)
+        },
+      }),
       systemPrompt: {
         section(section) {
           recorded.sections.push(section)
@@ -259,8 +272,56 @@ function executed(recorded) {
   return recorded.runs.filter((spec) => !AUDIT_COMMAND.test(spec.command))
 }
 
+/**
+ * What the fixture's shell answers with for one FOREGROUND command.
+ *
+ * The repository-config audit issues its own shell call, answered here from the test's
+ * own knobs so a test can arm the configuration it wants.
+ *
+ * @param options - the fixture options carrying the canned result.
+ * @param spec - the resolved spec the plugin handed to `execute`.
+ * @returns the `ShellRunResult` that spec settles with.
+ */
+function shellAnswer(options, spec) {
+  if (AUDIT_COMMAND.test(spec.command)) {
+    const keys = options.configKeys ?? []
+    return {
+      exitCode: options.configExitCode ?? 0,
+      signal: null,
+      timedOut: false,
+      timeoutMs: spec.timeoutMs,
+      stdout: { text: keys.join('\u0000'), truncated: false },
+      stderr: { text: '', truncated: false },
+    }
+  }
+  return options.runResult ?? {
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    timeoutMs: spec.timeoutMs,
+    stdout: { text: 'ok\n', truncated: false },
+    stderr: { text: '', truncated: false },
+  }
+}
+
 /** The minimal accepted arguments for one call. */
 const CALL = { description: 'Show working tree status' }
+
+describe('host plugin: the shell seam', () => {
+  it('pins the fixture to the seam the driver declares', () => {
+    // Two copies of one contract is how the plugin was written against an invented
+    // `run`/`start` pair: the fixture and the call sites agreed with each other and
+    // disagreed with the harness. This asserts they are the same list.
+    const { ctx } = fakeContext()
+    assert.deepEqual(Object.keys(ctx.shell).sort(), [...SHELL_SEAM].sort())
+  })
+
+  it('makes a method outside the seam a loud failure, not a silent one', () => {
+    const { ctx } = fakeContext()
+    assert.throws(() => ctx.shell.run({}), /has no run\(\)/)
+    assert.throws(() => ctx.shell.start({}), /has no start\(\)/)
+  })
+})
 
 describe('host plugin: registration', () => {
   it('registers git_exec and one prompt section, and nothing else', () => {

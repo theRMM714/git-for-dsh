@@ -448,7 +448,7 @@ Host 半默认对 `write` 与 `remote` 档位的每一次调用弹出审批，�
 ## 开发
 
 ```sh
-npm test       # 228 个测试：目录、闸门、环境、拼接、Host 集成、Client bundle 加载/降级/渲染
+npm test       # 239 个测试：目录、闸门、环境、拼接、Host 集成、shell seam、Client bundle 加载/降级/渲染
 npm run build  # 把 src/ 拷贝到 lib/，package.json 指向 lib/
 node scripts/verify-served-bundle.mjs <bundle>   # 用真实加载语义验证一个已构建/已服务的 bundle
 node scripts/verify-driver-hardening.mjs         # 用真实 git + 恶意仓库验证两条代码执行路径已关闭（含控制组）
@@ -491,6 +491,7 @@ src/index.js         Host 半：git_exec 工具、设置命名空间、系统提
 src/client.js        Client 半：设置页 UI（勾选、策略、代理、日志）
 src/log.js           诊断日志：同步追加、脱敏、2MB 轮转
 src/proxy.js         代理端口探测与等待
+src/shell-driver.js  唯一接触 ctx.shell 的模块：一次性命令与长驻进程两种形态
 src/routes.js        4 条同源路由路径的唯一来源（宿主 import、构建嵌入、页面读取）
 scripts/build.mjs    把 src/ 拷贝到 lib/
 scripts/render-preview.mjs        渲染离线布局预览
@@ -501,6 +502,7 @@ scripts/verify-artifacts.mjs         校验 lib/ 与 src/ 逐字节一致
 scripts/verify-nul-device.mjs        真实 git for Windows 验证空设备加固（含对照）
 test/git-catalog.test.mjs  目录、闸门、环境、拼接
 test/host.test.mjs         Host 半集成（允许清单闸门、审批闸门、结果形状、兜底）
+test/shell-driver.test.mjs shell seam 适配器：两种形态、错误指名、句柄校验
 test/client.test.mjs       Client bundle 真实加载、服务声明完备性、错误兜底
 test/log.test.mjs          诊断日志：两个开关、脱敏、轮转
 test/proxy.test.mjs        代理端口探测、等待、环境注入
