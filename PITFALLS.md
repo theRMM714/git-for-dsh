@@ -197,9 +197,12 @@ settings.writable: true
 | Host 侧 `SettingsScope` | 只有 `get`/`watch`/`update`/`replace` | 写成 `subscribe`/`set`（那是浏览器侧 API）→ 假绿 |
 | `ctx` 服务读取 | 读未声明服务**抛错** | 漏掉"声明缺失 → 命名空间没注册 → 只读页面" |
 | `ctx.shell.resolve({})` | 省略 workdir 回落到**进程** cwd，不是会话工作区 | 在生产里跑到错的仓库 |
+| `ctx.shell` 的 seam | 只有 `resolve(request)` 与 `execute(spec)`，handle 上是 `result()`/`kill()` | 写成 `run`/`start`：生产里**每一次 git 调用**都死，而夹具同款假件让整个测试套件全绿（第 36 条） |
 | `ctx.approval` | 有 `overrideOf(session)`，插件靠它解释"策略 never" | 错误文案断言失效 |
 
 另外：Host 测试要用 `applyUnguarded`（无兜底的入口），否则 `apply()` 的兜底会把"夹具坏了"变成"工具未注册"，把真实原因藏起来。
+
+这道防线现在是**结构性**的：`test/host.test.mjs` 的假 shell 是一个只暴露 seam 方法的 Proxy，读到 `run`/`start` 这类方法直接抛错；适配器自身的行为由 `test/shell-driver.test.mjs` 钉住。
 
 ---
 
@@ -255,7 +258,7 @@ settings.writable: true
 
 **根因（实测）**：部署策略是 `workspace-write`，而它的 workspace root 是**进程 cwd**（`ctx.shell.resolve({}).workdir`），**不是会话工作区**。于是工作区里的 `.git` 也可能落在允许范围之外。
 
-**怎么避**：插件对每次 git 调用显式传 `sandboxPermissions: { mode: 'danger-full-access', workspaceRoot }`，并由允许清单 + 参数闸门 + 配置审计 + 逐次审批替代沙箱作为约束；同时**自己**把 workdir 解析成会话工作区（不能依赖 shell 的默认值）。
+**怎么避**：插件对每次 git 调用显式传 `sandboxPolicy: { mode: 'danger-full-access', workspaceRoot }`，并由允许清单 + 参数闸门 + 配置审计 + 逐次审批替代沙箱作为约束；同时**自己**把 workdir 解析成会话工作区（不能依赖 shell 的默认值）。
 
 **注意**：这一条只影响**插件自己的 git**。会话切到 `workspace-write` 预设不会妨碍它。
 
@@ -639,3 +642,31 @@ const word = command.slice(start, index)   // → word 为空，index 原地不�
 **一般化**：**跨平台的值要按"谁解释它"来验证** —— 同一个字符串交给 shell、git、Node 还是内核，解释规则各不相同，"我这边看着对"证明不了任何事。
 
 **谁守着**：`test/git-catalog.test.mjs` 断言 `NULL_DEVICE` 按平台取值、且强制配置表与它一致；Windows 真机侧本次另用了一份 `verify-nul-device.mjs` 做行为对照（尚未入库）。
+
+---
+
+## 36. 假 shell 实现了不存在的 API —— 工具全死、测试全绿
+
+**现象**：模型每次调用 `git_exec` 都拿到同一句话，工具等于不存在（子命令、路径、审批设置都无关）：
+
+```
+git status could not start: ctx.shell.run is not a function
+```
+
+**根因**：harness 的 shell 服务（`ShellExecutor`）只声明两个方法 —— `resolve(request)` 与 `execute(spec) -> ShellExecution`，进程句柄上是 `result()` 与 `kill()`。插件却按 `run(spec)` / `start(spec)` 调用，这两个方法**从来不存在**。三处调用点全中：git 调用、仓库配置审计、代理启动。
+
+而 `test/host.test.mjs` 的假 shell 实现的**正是那套不存在的 API**，于是插件与夹具互相印证，整个测试套件全绿 —— 缺陷只能由真实运行暴露。两个连带后果：
+
+- **仓库配置审计一直是静默失效的**：审计自己的 shell 调用同样抛错，被 fail-open 的 `catch` 当成"这个目录没有配置可读"吞掉（第 33 条列出的那处），所以那套危险键闸门在生产里从未真正跑过；
+- **代理启动还有第二个坏点**：它传 `timeoutMs: 0`，而真实 `resolve` 只接受正的有限值（0 不是"关掉超时"的公开哨兵）。长驻进程要去掉期限，用的是 `onExpiry: 'none'`。
+
+**怎么修**：把 seam 收进一个模块（`src/shell-driver.js`），插件只依赖它的两种形态 —— `runOnce(request)`（一次性命令：resolve → execute → await `result()`）与 `startBackground(request)`（长驻进程：保留句柄、不 await result、强制 `onExpiry: 'none'`）。调用点不再各自猜方法名，而 seam 的名字只有一处维护。
+
+**怎么避**：
+
+- **假件必须照真实契约写**（第 11 条），并且要**结构性**地保证：宿主测试里的假 shell 是只暴露 seam 方法的 Proxy，读到 `run`/`start` 这类方法直接抛错；
+- 契约另有一条测试（`test/shell-driver.test.mjs`）：seam 缺失时给出的错误必须**指名缺哪个方法**并说明这是插件/harness 不匹配，而不是 `is not a function`；
+- 收到 `is not a function` 这类框架层报错时，先怀疑自己调的 API 不存在，再怀疑参数；
+- `timeoutMs: 0` 这类"我以为是关掉超时"的哨兵，要对着实现的校验写，而不是对着自己的意图写 —— 假件的 `resolve` 也照真实实现校验，这条才在测试里挡得住。
+
+**谁守着**：`test/host.test.mjs`（Proxy 假件，外加 "pins the fixture to the seam the driver declares"）与 `test/shell-driver.test.mjs`（适配器本身）。

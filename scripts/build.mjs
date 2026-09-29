@@ -106,7 +106,7 @@ function buildStamp(parts) {
 // beside it in `lib/`.
 // Every host module the entry point imports has to be here: a missing one makes
 // `lib/index.js` fail to load at activation.
-for (const file of ['index.js', 'git-catalog.js', 'proxy.js', 'log.js', 'routes.js']) {
+for (const file of ['index.js', 'git-catalog.js', 'proxy.js', 'log.js', 'routes.js', 'shell-driver.js']) {
   copyFileSync(`${root}src/${file}`, `${lib}${file}`)
 }
 
@@ -191,7 +191,7 @@ if (!clientSource.includes(BUILD_TOKEN)) {
 }
 const serialized = serializeCatalog()
 const stamp = buildStamp([
-  ...['index.js', 'git-catalog.js', 'proxy.js', 'log.js', 'routes.js'].map((file) => readFileSync(`${root}src/${file}`, 'utf8')),
+  ...['index.js', 'git-catalog.js', 'proxy.js', 'log.js', 'routes.js', 'shell-driver.js'].map((file) => readFileSync(`${root}src/${file}`, 'utf8')),
   clientSource,
   serialized,
 ])
