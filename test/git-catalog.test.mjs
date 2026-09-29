@@ -703,6 +703,19 @@ describe('command composition', () => {
     assert.equal(composeCommand(['add', '--', 'a b.js']), `git add -- 'a b.js'`)
     assert.equal(composeCommand(['log', '-n', '5']), 'git log -n 5')
   })
+
+  it('quotes a token the same way wherever it sits in argv', () => {
+    const dialect = process.platform === 'win32' ? 'pwsh' : 'sh'
+    const token = "it's"
+    const quoted = shellQuote(token, dialect)
+    // Position-independence is the property that broke: `composeCommand` used
+    // `argv.map(shellQuote)`, which hands the array INDEX to the `dialect` parameter, so every
+    // token from the third position on was quoted for `sh`. The dialects differ only for an
+    // embedded apostrophe — which is why the sibling test above stayed green while a commit
+    // message containing one reached git as three arguments on Windows.
+    assert.equal(composeCommand(['commit', '-m', token]), `git commit -m ${quoted}`)
+    assert.equal(composeCommand(['log', '--format', '%h', '--', token]), `git log --format %h -- ${quoted}`)
+  })
 })
 
 describe('lastPathSegment', () => {
