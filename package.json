@@ -2,7 +2,7 @@
   "name": "git-for-dsh",
   "description": "Allowlisted git execution for DeepSeek Harness: a model-facing git tool that runs outside the file sandbox, with a settings page where the user ticks which git subcommands are permitted and, per path, which reads and writes are allowed, prompted or refused",
   "type": "module",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "license": "MIT",
   "main": "lib/index.js",
   "exports": {
