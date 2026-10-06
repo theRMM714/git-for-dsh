@@ -105,6 +105,12 @@ function fakeContext(options = {}) {
   const services = {
     settings: options.withSettings === false ? undefined : settings,
     approval,
+    /**
+     * The confinement the calling session resolves to. The approval gate reads it to decide
+     * whether a per-call prompt is redundant; `undefined` here is how a composition without
+     * the service looks, and the gate must then keep asking.
+     */
+    sandboxPolicy: options.sandboxMode === undefined ? undefined : { resolve: () => ({ mode: options.sandboxMode }) },
     /** Routes are recorded so the port-test handler can be driven directly. */
     webServer: {
       register(route) {
@@ -494,6 +500,35 @@ describe('host plugin: approval gate', () => {
     assert.equal(executed(recorded).length, 1)
   })
 
+  it('skips the ask when the session already runs under danger-full-access', async () => {
+    // The session conceded file changes for its whole lifetime, so a per-call prompt could only
+    // block work the user already allowed.
+    const approval = approveOnce()
+    const { definition, recorded } = mount({
+      settings: { enabled: ['commit'], approveMutating: true, dangerousKeyPolicy: 'refuse-repo' },
+      approval,
+      sandboxMode: 'danger-full-access',
+    })
+    await definition.execute({ ...CALL, argv: ['commit', '-m', 'x'] }, execution())
+    assert.equal(recorded.approvals.length, 0, 'the prompt is redundant under full access')
+    assert.equal(executed(recorded).length, 1, 'the operation still runs')
+  })
+
+  it('still asks when the session is confined', async () => {
+    // The exemption is about FULL access; a confined session keeps the gate, and an absent
+    // policy service must read the same way.
+    for (const sandboxMode of ['workspace-write', undefined]) {
+      const approval = approveOnce()
+      const { definition, recorded } = mount({
+        settings: { enabled: ['commit'], approveMutating: true, dangerousKeyPolicy: 'refuse-repo' },
+        approval,
+        sandboxMode,
+      })
+      await definition.execute({ ...CALL, argv: ['commit', '-m', 'x'] }, execution())
+      assert.equal(recorded.approvals.length, 1, `mode ${String(sandboxMode)} must still ask`)
+    }
+  })
+
   it('refuses the call when the user rejects', async () => {
     const { definition, recorded } = mount({ settings: { enabled: ['push'], approveMutating: true, dangerousKeyPolicy: 'refuse-repo' }, approval: approveWith('rejected') })
     await assert.rejects(
@@ -739,9 +774,13 @@ describe('host plugin: the target is resolved once', () => {
       await definition.execute({ ...CALL, argv: ['status'], workdir: link }, execution())
       // The shell must be handed the RESOLVED directory, so a swap between the judgement and the
       // spawn cannot point it somewhere the rules never saw.
+      // Searched in the SERIALIZED runs, so every field is covered — but the needle has to be
+      // serialized too: `JSON.stringify` escapes backslashes, so a raw Windows path never
+      // appears in the JSON text.
       const handed = JSON.stringify(recorded.runs)
-      assert.ok(handed.includes(real), 'the resolved directory reaches the shell')
-      assert.ok(!handed.includes(link), 'the link itself is not what git is told to use')
+      const needle = (path) => JSON.stringify(path).slice(1, -1)
+      assert.ok(handed.includes(needle(real)), 'the resolved directory reaches the shell')
+      assert.ok(!handed.includes(needle(link)), 'the link itself is not what git is told to use')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

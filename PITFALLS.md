@@ -713,4 +713,29 @@ git status could not start: ctx.shell.run is not a function
 
 **谁守着**：`scripts/verify-artifacts.mjs`（按普通路径调 `--out`）与 `test/artifacts.test.mjs`。
 
+## 41. 拿 `JSON.stringify` 的结果做子串匹配 —— Windows 上永远匹配不到
+
+**现象**：断言「解析后的目录到达了 shell」在 Windows 上恒为假，而同样的断言在 Linux/macOS 上是对的；路径本身完全正确。
+
+**根因**：断言写的是 `JSON.stringify(recorded.runs).includes(real)`，而 `JSON.stringify` 会把路径里的反斜杠转义成 `\\`，于是原始路径字符串永远不会出现在那串 JSON 文本里。
+
+**怎么判**：断言在 Linux 绿、Windows 红，且涉及的字符串里有 `\\`。
+
+**怎么避**：要匹配序列化结果，就把**查找串也序列化**（`JSON.stringify(path).slice(1, -1)`），或者直接在解析后的结构上比较字段，别拿原始字符串去搜 JSON 文本。
+
+**谁守着**：`test/host.test.mjs` 的 "hands the shell the directory the rules judged" —— 它在 Windows 上真跑（junction）时会走这条判断。
+
+## 42. 受限进程里 `realpathSync` 打不开重解析点 —— 这不是 Node 或 Windows 的行为
+
+**现象**：在沙箱里建好的 junction，`realpathSync` 不解析它（返回链接自身），于是「链接与目标必须给出同一个答案」这条断言在沙箱下无法成立、只能 skip；一旦放开文件策略，同一份代码立刻解析正确。
+
+**根因**：`realpathSync` 走的是打开句柄再取最终路径，而受限令牌下的子进程打不开重解析点句柄。**这是进程权限的差别，不是平台能力**：同一个 junction 在非受限进程里解析得好好的。
+
+**怎么判**：用同一个脚本分别在受限与非受限下跑一次 `realpathSync(link) === realpathSync(target)`；受限下为假、非受限下为真，就说明是权限而不是缺陷。注意 Windows 上**文件**符号链接还需要开发者模式或特权（`EPERM`），那一条与沙箱无关。
+
+**怎么避**：需要重解析点的测试要么用 junction（目录可用、无需特权），要么按能力探测后**带原因 skip**；别改成硬链接顶替——硬链接的 `realpath` 是它自己，断言会失去意义。
+
+**谁守着**：`test/host.test.mjs` 的 `canCreateResolvableLink` 与两条链接用例的 skip 理由。
+
+
 

@@ -1032,7 +1032,8 @@ window.__ModuleLoader__.load({
                 'approveMutating',
                 value.approveMutating !== false,
                 '写操作前询问我',
-                '写档与远程档的每次调用都弹审批，而不只靠勾选放行。',
+                '勾选后，写档与远程档的每次调用都先问你一次；不勾选则不再单独征求同意（其余闸门照旧：子命令要已在允许清单里，'
+                  + '参数、目标与路径也要过关）。会话的文件策略是 danger-full-access 时本项不生效。',
               ),
 
               group('闸门'),
