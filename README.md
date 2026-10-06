@@ -6,7 +6,7 @@
 
 插件由两半组成，装一次即可：
 
-- **Host 半**（`src/index.js`）注册模型可见的工具 `git_exec`，并实现四道闸门：用户的允许清单、参数闸门、配置写入闸门，以及执行环境硬化。
+- **Host 半**（`src/index.js`）注册模型可见的工具 `git_exec`，并实现五道闸门：用户的允许清单、参数闸门、配置写入闸门、仓库配置审计，以及执行环境硬化。
 - **Client 半**（`src/client.js`）在「设置 → Git 工具」里渲染勾选页，用户在这里决定放行哪些子命令。
 
 ## 为什么需要它
@@ -15,15 +15,30 @@
 
 具体做法是**显式地不设沙箱**，改用**允许清单**作为安全边界：只有用户勾选过的子命令能启动进程，且参数必须通过参数闸门。
 
+之所以必须离开沙箱，是因为沙箱里的 git **能做本地操作、做不了远端操作** —— 被挡住的不是 git 的读写，而是它必须**捕获输出**的帮助进程，以及 TLS 的凭证获取：
+
+| 沙箱内的调用 | 实测结果 |
+| --- | --- |
+| `git init` / `git add` / `git commit`（工作区内） | **成功**：写 `.git`、写对象文件都允许 |
+| `git` / `curl` 走 schannel TLS | 0.2 秒内失败：`schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`，直连与走代理一样 |
+| `git push` 拉起凭据助手（`sh.exe`） | `fatal error - couldn't create signal pipe, Win32 error 5`，随后 `fatal: could not read Username` |
+| git 调自带的 MSYS2 `ssh.exe` | 同一个 signal pipe 错误 |
+| 对照：`ssh` 换成 Windows 原生 OpenSSH | **可用** |
+| 对照：换 `http.sslBackend=openssl` | TLS 可用，push 仍卡在凭据助手 |
+
+这些都不是文件权限问题 —— 同一个工作区里写 `.git` 是允许的。它们来自进程级限制：git 要**捕获**帮助进程的输出，而被捕获的子进程需要一类沙箱不发放的管道；TLS 则取不到凭证。
+
+本插件的每次调用都以 `sandboxPolicy: { mode: 'danger-full-access' }` 运行 git：当前 dsh 的沙箱执行器在该模式下**直接透传本地执行、不调用 `confine()`**，因此上述限制一个都不存在。约束改由闸门承担。
+
 ### 在 Windows 上还有一条更硬的理由
 
 dsh 的交互式 bash 工具依赖两条在 Windows 上并不存在的路径，报错原文就在 dsh 自己代码里：
 
 - **进程检查器只实现到 Linux/macOS** —— 报错原文就在 `dsh-subprocess-local` 里；
 - **交互式终端依赖 PTY** —— 报错原文在 `dsh-terminal-bash` 里；
-- **Windows 的 ACL 沙箱以受限令牌隔离进程** —— `dsh-sandbox-windows-acl` 通过 FFI 直接调用 `createRestrictedToken`（带 restricting SID），而 MSYS 运行时需要创建共享内存映射，这类操作会被受限令牌拒绝。
+- **Windows 的 ACL 沙箱以受限令牌隔离进程** —— `dsh-sandbox-windows-acl` 通过 FFI 直接调用 `createRestrictedToken`（带 restricting SID），而 MSYS 运行时在启动时依赖一类受限令牌下拿不到的运行时通信 —— 实测表现为 `couldn't create signal pipe, Win32 error 5`。
 
-即使不经过交互式 bash，**沙箱内的 git 也做不了远端操作**：实测在沙箱内 `git fetch` 会以 `error: cannot create standard input pipe for remote-https: Permission denied` 失败，而本地读操作不受影响。
+即使不经过交互式 bash，**沙箱内的 git 也做不了远端操作** —— 实测是三条路各自被挡（见上文那张表：TLS 取不到凭证、凭据助手与 MSYS2 ssh 的 signal pipe 被拒），而本地操作不受影响，连 `git commit` 都可以。
 
 **本插件的 `git_exec` 两条都避开了**，因此不受这些限制：
 
@@ -74,7 +89,7 @@ dsh plugin --profile <profile> update git-for-dsh
 重启 Profile 后：
 
 - 模型获得 `git_exec` 工具；
-- 设置面板出现「Git 工具」页，勾选即刻生效并持久化到 Profile 的 `settings.yaml`。
+- 设置面板出现「Git 工具」页，勾选即刻生效并持久化到 Profile 的 `cordis.patch.yml`（用户补丁层里的 `tool-git` 条目）。
 
 Host 半注册 `tool-git` 设置条目；Client 半通过 `ctx.configForms.get('tool-git')` 取同一个表单读写。**清单本身在构建时从 `src/git-catalog.js` 直接嵌进浏览器产物**（`scripts/build.mjs` 替换 `__GIT_TOOL_CATALOG__`），所以勾选页和 Host 的闸门读的是同一份清单，而浏览器不需要任何通往 Host 的运行时通道 —— 改完目录要重新 `npm run build` 并刷新页面。
 
@@ -129,7 +144,7 @@ Host 半注册 `tool-git` 设置条目；Client 半通过 `ctx.configForms.get('
 
 无论勾选了什么都不放行以下参数：
 
-- `-c` / `--config-env` / `-C` / `--git-dir` / `--work-tree` / `--exec-path` / `--bare` 等 —— 配置注入或切换仓库，**但只在「全局位置」（第一个参数）拒绝**。经 git 2.55 验证，这些全局选项在子命令**之后**不再被 git 采纳（`git status -C <别的仓库>` 报 `unknown switch`），而那里它们往往是子命令自己的旗标：`switch -c`、`commit -C`、`add -u`、`init --bare`。一律拒绝会误伤日常操作。
+- `-c` / `--config-env` / `-C` / `--git-dir` / `--work-tree` / `--exec-path` / `--bare` 等 —— 配置注入或切换仓库，**但只在「全局位置」（第一个参数）拒绝**。经真实 git 验证，这些全局选项在子命令**之后**不再被 git 采纳（`git status -C <别的仓库>` 报 `unknown switch`），而那里它们往往是子命令自己的旗标：`switch -c`、`commit -C`、`add -u`、`init --bare`。一律拒绝会误伤日常操作。
 - `--upload-pack` / `--receive-pack` / `--exec` —— 指定 git 要执行的程序，任何位置都拒绝。
 - `-u` 按子命令判定：对 `fetch` / `pull` / `ls-remote` 它是 `--upload-pack` 的短形式（拒绝），对 `add` / `commit` / `push` 是普通旗标（放行）。
 
@@ -204,6 +219,8 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 
 除了 git 的允许清单，插件还装了一个**工具守卫**（`tools/pre-execute` waterfall），对**每一次**工具调用做判定。原生 git 与凭据路径是两项独立设置，档位不同：原生 git 有四档，凭据路径有三档。
 
+**先看覆盖范围**：命令文本相关的判定只挂在工具名 `bash` 上，而 Windows 上的 shell 工具是 `pwsh`。因此在 Windows 上，下面这张表里的**原生 git 拦截**、命令文本里的路径/读写成份启发式、以及 `guard.enter` 的命令前缀记录**都不生效**（实测：本插件启用时 `pwsh git --version` 正常执行）。按**路径参数**判定的那一层不受影响：`read`/`write`/`edit`/`glob`/`grep` 的路径参数、写入脚本的内容检查、以及 `git_exec` 自身参数的判定都照常工作。
+
 **原生 git** 有两档「拒绝」，差别在**判定宽度** —— 这是一个取舍，由用户选择：
 
 | 档位 | 判定 | 代价 |
@@ -217,7 +234,7 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 
 三条比较规则各防一类失效：按**路径段**比较（`/work/app2` 不算在 `/work/app` 之内）、**先解析软链接**（否则工作区里一个指向 `/` 的链接就能走出去）、**Windows 上忽略大小写**。判定的是目标的**生效值** —— 省略 `workdir` 时它会默认成会话工作区。
 
-**写入脚本时检查内容**（三档，默认「严格」）：`bash deploy.sh` 会把 git 调用藏在一个文件名后面，而判别器只看得到命令行。开启后，脚本在**写入时**就被判一次内容：内容已经在调用参数里，因此这个判定**不做任何文件系统访问**，命中时**拒绝这次写入**（脚本根本不会落地），而不是等它被执行时才拒。判多宽由**这个设置自己**的三档决定：**严格**（默认）在内容里**提到** git 时即命中，抓得住"只提了一句"的脚本，也难免误伤；**限制**只在**命令位置**出现时命中，基本不误伤；**关闭**则不判内容（脚本运行时的命令行判别仍然生效）。
+**写入脚本时检查内容**（三档，默认「严格」）：`bash deploy.sh` 会把 git 调用藏在一个文件名后面，而判别器只看得到命令行。开启后，脚本在**写入时**就被判一次内容：内容已经在调用参数里，因此这个判定**不做任何文件系统访问**，命中时**拒绝这次写入**（脚本根本不会落地），而不是等它被执行时才拒。判多宽由**这个设置自己**的三档决定：**严格**（默认）在内容里**提到** git 时即命中，抓得住"只提了一句"的脚本，也难免误伤；**限制**只在**命令位置**出现时命中，基本不误伤；**关闭**则不判内容（脚本运行时的命令行判别仍然生效）。这条检查的判定对象是 **sh 家族脚本**：按扩展名命中，或首行 shebang 是 `sh`/`bash`/`zsh`/`ksh`/`dash`/`ash`。**PowerShell 脚本（`.ps1`）不在判定范围内。**
 
 这条保护的边界是：**以其他方式到来的脚本不被内容检查** —— 已存在的文件、由别的命令生成的文件、嵌套脚本、here-document、运行时才确定的解释器、或换一种语言调用 git，都看不到。它是一层启发式，不是保证。之所以不在执行 `bash script.sh` 时去读文件内容，是因为守卫跑在 dsh 进程里、对每一次工具调用同步执行，在那里做同步文件读取会拖住整个应用。
 
@@ -225,7 +242,7 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 
 默认保护 `~/.git-credentials` 与 `~/.gitconfig`，可在设置页修改。
 
-**为什么拦 git**：`bash` 里的 git 绕过本插件的允许清单、参数闸门、配置审计与审批 —— 它读全局配置、跑未加固的环境。所以默认拒绝，并明确提示改用 `git_exec`。
+**为什么拦 git**：`bash` 里的 git 绕过本插件的允许清单、参数闸门、配置审计与审批 —— 它读全局配置、跑未加固的环境。所以默认拒绝，并明确提示改用 `git_exec`。Windows 上这条拦截目前不覆盖 `pwsh`（见本节开头的覆盖范围）。
 
 **为什么拦凭据**：本机凭据文件对同 uid 可读（dsh 的沙箱限制写入、不限制读取），「AI 顺手读一下」是现实存在的路径。守卫关掉这条路，而插件内部的 git（沙箱外、不是工具调用）不受影响，推送照常。
 
@@ -268,7 +285,7 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 
 **它与凭据的关系**：插件**不注入任何凭据**，令牌留在用户启动的那个代理里。这与「凭据永不进入 AI 上下文」是两件事：代理里有什么、放哪儿，仍由用户决定（见下文的边界说明）。
 
-「启动命令」是一段会被执行的**受信配置** —— 只有用户能写它（模型的写权限被限制在会话工作区内，动不了 `settings.yaml`）。
+「启动命令」是一段会被执行的**受信配置** —— 只有用户能写它（模型的写权限被限制在会话工作区内，动不了 profile 的 `cordis.patch.yml`）。
 
 ### 本机凭据：默认隔离，可显式放开
 
@@ -290,7 +307,7 @@ git config --local diff.evil.command "sh -c '…'" + .gitattributes  → git dif
 
 开启这一项时，令牌不经过参数、审批提示与会话记录，因为 git 自己读取它。
 
-**这一项不解决「令牌会不会被 AI 读到」。** 同一 uid 下 `git credential fill` 能直接取出令牌，同 uid 进程的环境变量也可读，而且模型还能用 `bash` 绕过本插件直接驱动 git。所以本工具能承诺的仍然只有一条：**它自己不读取、不传递、不存储凭据，也不把凭据写进参数、审批提示或会话记录**（URL 里内嵌凭据的形式已被拒绝）。真正的隔离只能来自沙箱之外的边界。
+**这一项不解决「令牌会不会被 AI 读到」。** 同一 uid 下 `git credential fill` 能直接取出令牌，同 uid 进程的环境变量也可读，而且模型还能用 shell（`bash`；Windows 上是 `pwsh`，见「工具守卫」的覆盖范围）绕过本插件直接驱动 git。所以本工具能承诺的仍然只有一条：**它自己不读取、不传递、不存储凭据，也不把凭据写进参数、审批提示或会话记录**（URL 里内嵌凭据的形式已被拒绝）。真正的隔离只能来自沙箱之外的边界。
 
 ### 本插件的承诺，以及它的边界
 
@@ -330,10 +347,10 @@ git pull --ff-only origin main
 | 闸门 | 凭据与身份文件 | 禁止 | 禁止 / 询问 / 允许 |
 | 闸门 | 受保护的路径 | `~/.git-credentials, ~/.gitconfig` | 逗号分隔 |
 | 闸门 | 路径权限 | 内置五行，三项全不勾 | 每行一条路径，三个复选框：**读**／**写**＝静默放行，**询问**＝每次访问先问你（批准即放行该次），**三项都不勾＝静默禁止（不打扰你）**。内置行（凭据与身份文件）默认全不勾、**不可删除**、可随时修改；自己加的路径可删除。没有"整表开关"，停用某行＝清空它的勾选 |
-| 闸门 | bash 里的路径判定 | 启发式 | 两选：**启发式**（明显读按读、明显写按写、其余按写＝保守兜底）或**一律按写**。守卫只能看到命令文本，所以这一层**本质是启发式**，不是文件访问事实 |
+| 闸门 | bash 里的路径判定（仅 `bash` 工具） | 启发式 | 两选：**启发式**（明显读按读、明显写按写、其余按写＝保守兜底）或**一律按写**。守卫只能看到命令文本，所以这一层**本质是启发式**，不是文件访问事实 |
 | 闸门 | 目标范围 | 仅工作区 | git 可以在哪里执行：仅工作区（默认）／指定路径（只在列出的根目录内）／无限制（机器上任何目录） |
-| 闸门 | 写入脚本时检查内容 | 严格 | 三档：严格（提到即拒）／限制（只在命令位置判，基本不误伤）／关闭。写入时按参数内容判，不产生文件系统访问 |
-| 闸门 | SSH 程序 | `/usr/bin/ssh` | 由 `GIT_SSH_COMMAND` 钉死；旁边有「探测」按钮 |
+| 闸门 | 写入脚本时检查内容 | 严格 | 三档：严格（提到即拒）／限制（只在命令位置判，基本不误伤）／关闭。写入时按参数内容判，不产生文件系统访问。只认 sh 家族脚本（`.ps1` 不在范围内） |
+| 闸门 | SSH 程序 | 按平台给默认值：Windows 上是 `C:/Windows/System32/OpenSSH/ssh.exe`，其余平台是 `/usr/bin/ssh` | 由 `GIT_SSH_COMMAND` 钉死；旁边有「探测」按钮 |
 | 凭据 | 允许 git 使用本机凭据 | 关 | 开启后远程写操作可以认证，代价见上文 |
 | 代理 | 端口 | `0`（关闭） | `127.0.0.1` 上的端口；旁边有「端口测试」按钮 |
 | 代理 | 启动命令 | 空 | 首次远程操作时执行一次 |
@@ -365,7 +382,7 @@ tail -f ~/.dsh/tool-git.log
 | 行 | 含义 |
 | --- | --- |
 | `activate` | 激活时的策略快照（开关、档位、代理、ssh 程序…） |
-| `guard.enter` | 某次工具调用进入守卫，bash 调用附带命令前 60 个字符（脱敏后） |
+| `guard.enter` | 某次工具调用进入守卫；`bash` 调用附带命令前 60 个字符（脱敏后），其它 shell 工具不带 |
 | `guard.exit` | 守卫的判定与**耗时（毫秒）** |
 | `guard.error` | 守卫自身出错（仍会放行，绝不断调用） |
 | `tool.done` | 一次工具调用真正结束（失败时带 `failed=true`） |
@@ -378,7 +395,7 @@ tail -f ~/.dsh/tool-git.log
 **两处可选项**：
 
 - **心跳行**（默认**关闭**，与「写诊断日志」**互不影响**）：开启后每 5 秒写一行 `heartbeat n=… open=… openMs=…`，报出「当前有哪个调用卡在半途、卡了多久」，用于**把卡死定位到具体阶段**：没有它，「闲置时开始的卡死」与「调用中开始的卡死」在日志里长得一样。两个开关独立：只开心跳 = 存活探针（日志里只有心跳行）；只开调用日志 = 审计轨迹。
-- **命令前缀**（始终记录）：`guard.enter` 会带上该次 bash 命令的**前 60 个字符**（脱敏后）。只写 `tool=bash` 看不出在跑什么，这一条是定位「哪条命令引发卡死」的唯一线索。
+- **命令前缀**（`bash` 调用记录）：`guard.enter` 会带上该次 bash 命令的**前 60 个字符**（脱敏后）。只写 `tool=bash` 看不出在跑什么，这一条是定位「哪条命令引发卡死」的唯一线索。Windows 上的 `pwsh` 调用不带命令前缀。
 
 日志用**同步追加**写：这样「缺了一行」只可能是真的没写，而不是烂在缓冲里。它也是本插件里**唯一**碰文件系统的地方；日志路径默认放在 harness 状态旁边，而不是 Windows 盘上。超过 2MB 自动轮转为 `.1`（每 200 行检查一次大小）。
 
@@ -401,7 +418,7 @@ tools/watchdog.sh                      # 只探测并报告
 DSH_RESTART_CMD='dsh web' tools/watchdog.sh --restart   # 卡住时 kill -9 并重启
 ```
 
-它的探针是**对 dsh 自己的 web 服务发 HTTP 请求**：回答来自事件循环，所以请求超时说明循环没在跑。它**不依赖本插件**，因此在「插件就是元凶」的情况下照样有效。重启用的是 `kill -9` —— 事件循环被卡死时，JavaScript 写的信号处理器没有机会运行，**只有内核处理的信号能穿透**。
+它的探针是**对 dsh 自己的 web 服务发 HTTP 请求**：回答来自事件循环，所以请求超时说明循环没在跑。它**不依赖本插件**，因此在「插件就是元凶」的情况下照样有效。重启用的是 `kill -9` —— 事件循环被卡死时，JavaScript 写的信号处理器没有机会运行，**只有内核处理的信号能穿透**。脚本是 POSIX `sh` 并用 `pgrep` 找进程，因此 Windows 上需要 WSL 或 Git Bash；默认只探测并报告，`--restart` 且提供 `DSH_RESTART_CMD` 时才会 kill 并重启。
 
 **守卫内部的扫描都有步数预算**：预算耗尽时守卫按**最严策略**拒绝并说明原因，而不是让宿主进程停住。定时器无法中断同步循环，所以只有循环自己会去查的计数器有效。预算设在**远高于任何真实命令**的量级，只有「这段代码没预料过的输入」才会触发。
 
@@ -436,7 +453,7 @@ Host 半默认对 `write` 与 `remote` 档位的每一次调用弹出审批，�
    DSH_GIT_TOOL_DISABLED=1 dsh --profile web
    ```
 
-2. **删掉 patch 里的那三行**。`cordis.patch.yml` 的 `patchReload: live` 会在启动时重新读它；这一步不需要卸载依赖，`package.json` 与 `node_modules` 里的软链留着不影响。
+2. **删掉 patch 里的那三行**。改完重启即生效；运行中的 Host 由 HMR 对补丁做 reconcile。这一步不需要卸载依赖，`package.json` 与 `node_modules` 里的软链留着不影响。
 
 3. **彻底卸载**。`dsh plugin --profile <profile> remove git-for-dsh` —— 它同时会把这个依赖从 `dsh.profile.bundles` 里摘掉（reconciler 按已安装状态对齐）。若曾在 profile 自己的 patch 里重述过该行，再删掉那一行。
 
@@ -448,7 +465,7 @@ Host 半默认对 `write` 与 `remote` 档位的每一次调用弹出审批，�
 ## 开发
 
 ```sh
-npm test       # 239 个测试：目录、闸门、环境、拼接、Host 集成、shell seam、Client bundle 加载/降级/渲染
+npm test       # 全部测试（node --test）：目录、闸门、环境、拼接、Host 集成、shell seam、Client bundle 加载/降级/渲染
 npm run build  # 把 src/ 拷贝到 lib/，package.json 指向 lib/
 node scripts/verify-served-bundle.mjs <bundle>   # 用真实加载语义验证一个已构建/已服务的 bundle
 node scripts/verify-driver-hardening.mjs         # 用真实 git + 恶意仓库验证两条代码执行路径已关闭（含控制组）

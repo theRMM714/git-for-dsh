@@ -1,6 +1,6 @@
 # 踩坑记录
 
-这个文件收集本项目**实际踩过**的坑：每条都写清「现象 / 根因 / 怎么判 / 怎么避 / 谁守着」。
+这个文件收集本项目**实际踩过**的坑：每条都写清现象、根因与怎么避；有的条目附判据、谁守着或平台边界。
 
 分工：`README.md` 描述**现在的设计与用法**，`DESIGN.md` 记录**设计决策与取舍**（为什么这样做、换来什么、代价是什么），这里记录**实际踩过的坑**：现象、根因、以及再动它时容易掉进哪里。
 
@@ -83,7 +83,7 @@ settings.writable: true
 
 **根因**：客户端 bundle 是页面加载时取回的模块。页面不重新加载，浏览器就一直用内存里的旧版本 —— 而症状与新修的 bug 一模一样。
 
-**怎么判**：设置页底部有一行 **`页面版本 <构建指纹>`**（由 `scripts/build.mjs` 写入，例如 `2026-09-15 12:07Z/5dcab9b4`）。和仓库里 `lib/client.js` 里的指纹对比：**不一致就是页面旧了，强制刷新即可**。
+**怎么判**：设置页底部有一行 **`页面版本 <构建指纹>`**（由 `scripts/build.mjs` 写入，是构建内容的 sha256 取前 12 位十六进制）。和仓库里 `lib/client.js` 里的指纹对比：**不一致就是页面旧了，强制刷新即可**。
 
 **怎么避**：改完客户端先 `npm run build`，再强制刷新；报障时先要那一行版本号。
 
@@ -134,7 +134,7 @@ settings.writable: true
 
 **现象**：配置审计全绿，但**什么都没做** —— 每次调用都放行。
 
-**根因**：我让 git 跑 `config --local --includes --name-only -z`。git 2.55 直接 **exit 129**（`error: no action specified` —— `--name-only` 必须与 `--list` 同用）。而"读不到配置"按设计**不算拒绝**（非仓库目录本来就无配置可读）。两个设计叠在一起 → 闸门永远读不到东西、永远放行。
+**根因**：我让 git 跑 `config --local --includes --name-only -z`。真实 git 直接 **exit 129**（`error: no action specified` —— `--name-only` 必须与 `--list` 同用）。而"读不到配置"按设计**不算拒绝**（非仓库目录本来就无配置可读）。两个设计叠在一起 → 闸门永远读不到东西、永远放行。
 
 **更糟的是测试**：单元测试只断言"命令字符串里含 `--includes`" —— 命令根本跑不起来，测试照样绿。
 
@@ -194,9 +194,9 @@ settings.writable: true
 
 | 替身 | 真实的形状 | 宽松的后果 |
 | --- | --- | --- |
-| Host 侧 `SettingsScope` | 只有 `get`/`watch`/`update`/`replace` | 写成 `subscribe`/`set`（那是浏览器侧 API）→ 假绿 |
+| Host 侧设置作用面 | 能读、能观察、能写、能替换 | 写成 `subscribe`/`set`（那是浏览器侧 API）→ 假绿 |
 | `ctx` 服务读取 | 读未声明服务**抛错** | 漏掉"声明缺失 → 命名空间没注册 → 只读页面" |
-| `ctx.shell.resolve({})` | 省略 workdir 回落到**进程** cwd，不是会话工作区 | 在生产里跑到错的仓库 |
+| `ctx.shell.resolve({})` | shell 自身的默认 workdir **不是**会话工作区；有会话的调用另由调用层把会话工作区戳进沙箱策略 | 在生产里跑到错的仓库 |
 | `ctx.shell` 的 seam | 只有 `resolve(request)` 与 `execute(spec)`，handle 上是 `result()`/`kill()` | 写成 `run`/`start`：生产里**每一次 git 调用**都死，而夹具同款假件让整个测试套件全绿（第 36 条） |
 | `ctx.approval` | 有 `overrideOf(session)`，插件靠它解释"策略 never" | 错误文案断言失效 |
 
@@ -219,7 +219,9 @@ settings.writable: true
 
 默认表里**没有**"完全权限 + 仍弹审批"的组合。
 
-**怎么避**：知道这是**两条独立旋钮**被一条预设同时拨动。要测写档：把会话预设切到 `workspace-write`（= 受限沙箱 + ask）—— **这不影响插件的 git**，因为插件对自己的 git 调用显式指定了沙箱外执行；预设只影响 `bash`/`read`/`write` 等工具。或者关掉插件里的"写操作前询问我"，靠允许清单 + 审计 + 参数闸门三层。
+**怎么避**：知道这是**两条独立旋钮**被一条预设同时拨动。要测写档：把会话预设切到 `workspace-write`（= 受限沙箱 + ask）—— **这不影响插件的 git**，因为插件对自己的 git 调用显式指定了沙箱外执行；预设只影响 `bash`/`pwsh`/`read`/`write` 等工具。或者关掉插件里的"写操作前询问我"，靠允许清单 + 审计 + 参数闸门三层。
+
+**平台边界**：守卫只按工具名 `bash` 抽取命令文本；Windows 上 shell 工具是 `pwsh`，因此原生 git 拦截、命令文本路径启发式与命令前缀日志在 Windows 上都不生效。写入脚本时的内容检查同样只认 sh 家族（按扩展名或首行 shebang 匹配 sh/bash/zsh/ksh/dash/ash），**不认 PowerShell 脚本**（`.ps1`），所以这项防护在 Windows 上同样落空。
 
 **注意**：审批策略按**会话**记录（写在会话日志里），新会话回到部署默认 `ask`。
 
@@ -233,7 +235,7 @@ settings.writable: true
 
 顺带两个实测结论：
 
-- 强制注入的 `credential.helper=''` **确实**压住全局的 `store`（带控制组验证）—— 所以"允许读取用户级 git 配置"这个开关**换不来凭据能力**，只会让整份全局配置变得可读（用假 token 模拟验证过 token 会进入上下文）。这个开关因此被移除。
+- 强制注入的 `credential.helper=''` **确实**压住全局的 `store`（带控制组验证）—— 所以"允许读取用户级 git 配置"这个开关**换不来凭据能力**，只会让整份全局配置变得可读（用假 token 模拟验证过 token 会进入上下文）。
 - `git config -f <任意文件>` 可以定向读仓库外的文件，因此被列为禁止形式。
 
 **怎么避**：把"凭据不进 AI 上下文"当作**机器级/沙箱级**问题，而不是插件问题。本插件的承诺只有一条：**它自己不读取、不传递、不存储凭据，也不成为漏点**。至于密钥该由哪个 uid 持有、要不要放进模型看不到的命名空间，那是部署方的决定。
@@ -254,9 +256,9 @@ settings.writable: true
 
 ## 15. 插件为什么对 git 显式指定 `danger-full-access`
 
-**现象**：在会话沙箱里 `git init` 失败，报 `[sandbox: file access denied …]`。
+**现象**：会话沙箱内的远程操作失败 —— TLS 在 0.2 秒内报 `schannel: AcquireCredentialsHandle failed: SEC_E_NO_CREDENTIALS`；推送则卡在凭据助手上：`sh.exe: *** fatal error - couldn't create signal pipe, Win32 error 5`，随后 `fatal: could not read Username`。
 
-**根因（实测）**：部署策略是 `workspace-write`，而它的 workspace root 是**进程 cwd**（`ctx.shell.resolve({}).workdir`），**不是会话工作区**。于是工作区里的 `.git` 也可能落在允许范围之外。
+**根因（实测）**：沙箱挡住的是 git 必须**捕获输出**的帮助进程 —— 凭据助手（经 `sh`）与 git 自带的 MSYS2 `ssh` 都要建 signal pipe，被沙箱拒绝；schannel 的凭证获取同样被挡。**本地操作在沙箱内本来就可用**：有会话的调用由调用层把会话工作区戳进沙箱策略，工作区内写入成功（**包括仓库 `.git`**），`init`/`add`/`commit` 实测全部可用，工作区外被拒；只有**无会话**的调用才回落到部署默认。
 
 **怎么避**：插件对每次 git 调用显式传 `sandboxPolicy: { mode: 'danger-full-access', workspaceRoot }`，并由允许清单 + 参数闸门 + 配置审计 + 逐次审批替代沙箱作为约束；同时**自己**把 workdir 解析成会话工作区（不能依赖 shell 的默认值）。
 
@@ -309,7 +311,7 @@ git commit -C HEAD        → 被拒（这里的 -C 是「复用提交信息」�
 git add -u                → 被拒（这里的 -u 是「更新已跟踪文件」）
 ```
 
-**根因**：把关卡写成"凡 token 等于 `-c`/`-C`/`-u` 一律拒绝"，用来挡全局的配置注入。但**全局选项只在子命令之前才被 git 采纳** —— 用 git 2.55 实测：
+**根因**：把关卡写成"凡 token 等于 `-c`/`-C`/`-u` 一律拒绝"，用来挡全局的配置注入。但**全局选项只在子命令之前才被 git 采纳** —— 用真实 git 实测：
 
 | 形式 | 结果 |
 | --- | --- |
@@ -362,9 +364,9 @@ git pull --ff-only origin main
 fatal: could not read Username for 'https://github.com': terminal prompts disabled
 ```
 
-**根因**：插件无条件隐藏 `~/.gitconfig` 与系统配置，并清空 `credential.helper`。因此 git 拿不到 `store` 这类凭据助手，也无法交互式索要用户名。
+**根因**：插件**默认**隐藏 `~/.gitconfig` 与系统配置，并清空 `credential.helper`（设置页的「允许 git 使用本机凭据」开启后，这两项都会恢复）。因此默认档下 git 拿不到 `store` 这类凭据助手，也无法交互式索要用户名。
 
-**这是刻意的**：本插件的承诺是"自己不读取、不传递、不存储凭据"。远程认证应由**外部代理**完成（在 DSH 进程环境里设 `HTTPS_PROXY=…`，git 会继承，因为 `scrubbedParentEnv()` 保留代理变量）。
+**这是刻意的**：本插件的承诺是"自己不读取、不传递、不存储凭据"。需要认证能力必须显式开启「允许 git 使用本机凭据」（默认关闭）；不开启时认证只能发生在插件之外 —— 例如在 DSH 进程环境里设 `HTTPS_PROXY=…`（git 会继承，因为 `scrubbedParentEnv()` 保留代理变量）把出网与认证交给外部代理。
 
 **判据**：只读的远程操作（`ls-remote`、`fetch`、`clone` 公开仓库）**正常**；写操作（`push`）失败在"读不到用户名"。这说明凭据通道被隔离生效了，而不是网络或插件坏了。
 
@@ -439,7 +441,7 @@ s.replace(anchor, () => inserted)   // 逐字插入，不做任何解释
 
 **现象**：按 Inspect 目录写的 `ctx.tools.guard(fn)` 在动态插件里报 `is not a function`。
 
-**根因**：**动态插件拿到的是受限服务表面**。实测 `Object.keys(ctx.tools)` 只有 `register, schemas, get`；`guard`、`restrict`、`presentAs`、`executionMode`、`execute` 全都不在。
+**根因**：**动态插件拿到的是受限服务表面**。实测 `Object.keys(ctx.tools)` 只有 `register, schemas, get`；包（`@deepseek-ai/dsh-tools`）公开的 `restrict` 与 `guard` 不在这份表面上。
 
 **怎么避**：用 `tools/pre-execute` —— 它是**事件**（waterfall），`ctx.on` 就能监听，决定类型是：
 
@@ -451,6 +453,8 @@ s.replace(anchor, () => inserted)   // 逐字插入，不做任何解释
 
 1. **工具管道只能放行/拒绝/询问，不能改写参数** —— 所以"拦截 bash 里的 git 然后路由到插件"在工具层做不到。
 2. **守卫的错误会被自己吞掉**：一个抛错的守卫如果继续抛，会掐断会话里的**每一次**工具调用，所以必须 `try/catch` 后 `next()`。代价是**坏掉的守卫看起来和平庸的守卫一样** —— 因此单元测试要**直接驱动这个监听器**（实测中就是它抓出了"函数没落盘、守卫抛 ReferenceError 却静默放行"）。
+
+**平台边界**：守卫只按工具名 `bash` 抽取命令文本；Windows 上 shell 工具是 `pwsh`，所以原生 git 拦截在 Windows 上不生效。
 
 ---
 
@@ -487,6 +491,8 @@ s.replace(anchor, () => inserted)   // 逐字插入，不做任何解释
 - 增加**心跳行**（每 5 秒一行，报出当前卡在半途的调用及其已持续时长），把「卡在调用内部」与「闲置时卡死」分开。心跳默认**关闭**（它已经完成过一次使命：把一次挂起定位到某个调用内部），调查卡死时打开、平时关着；
 - 两个开关**互相独立**：只开心跳 = 存活探针（日志里只有心跳行）；只开调用日志 = 审计轨迹。它们回答的是两个不同问题 —— 日志说「插件做了什么」，心跳说「进程还活着吗、卡在哪」。
 
+**平台边界**：命令文本只从工具名 `bash` 的调用里取；Windows 上 shell 工具是 `pwsh`，所以命令前缀日志在 Windows 上不生效，写入脚本时的内容检查也只认 sh 家族、不认 `.ps1`。
+
 **教训**：可观测性缺口本身就是一个坑：它会让人在错误的方向上耗掉大量时间（见第 31 条的排查过程）。把两个不同的问题合并到一个开关里，等于牺牲掉其中一个。
 
 **谁守着**：`test/log.test.mjs`（两个开关互不影响、心跳行格式、脱敏与长度上限）与 `test/host.test.mjs` 的日志用例。
@@ -509,7 +515,7 @@ s.replace(anchor, () => inserted)   // 逐字插入，不做任何解释
 
 **现象**：用户报告"AI 一调用工具，整个 WSL 就冻住"。关掉插件后不再出现。
 
-**根因**：守卫跑在 **dsh 进程里（不在 bash 沙箱内）**，而它**每一次**工具调用都要：受保护路径 `realpathSync` ×2，再对**模型给的路径**（通常就在 `/mnt/d`）`realpathSync` 一次。`realpathSync` 落到 **drvfs（Windows 盘）** 上是同步调用 —— Windows 侧一忙就长时间阻塞，**卡住的是 dsh 进程本身**，表现即整个界面冻住。
+**根因**：守卫跑在 **dsh 进程里（不在 shell 沙箱内）**，而它**每一次**工具调用都要：受保护路径 `realpathSync` ×2，再对**模型给的路径**（通常就在 `/mnt/d`）`realpathSync` 一次。`realpathSync` 落到 **drvfs（Windows 盘）** 上是同步调用 —— Windows 侧一忙就长时间阻塞，**卡住的是 dsh 进程本身**，表现即整个界面冻住。
 
 **怎么避**：
 
@@ -519,6 +525,8 @@ s.replace(anchor, () => inserted)   // 逐字插入，不做任何解释
 
 **教训**：`tools/pre-execute` 的守卫是**同步**的，且**在 dsh 进程里对每一次工具调用执行**。任何同步 I/O 都等于给每次工具调用加了阻塞风险 —— 在没有把握之前，宁可退化成纯内存比较。
 
+**平台边界**：命令文本判别只对工具名 `bash` 触发；Windows 上 shell 工具是 `pwsh`，所以这条判别在 Windows 上不生效。
+
 **谁守着**：`test/host.test.mjs` 的守卫用例仍然驱动真实监听器（拒绝/放行/ask/allow 与"自身出错不得中断调用"）。
 
 ---
@@ -527,13 +535,7 @@ s.replace(anchor, () => inserted)   // 逐字插入，不做任何解释
 
 **现象**：用户在设置页把原生 git 改成「限制」，保存后**又变回「禁止」**，看起来改不动。
 
-**根因**：原生 git 的档位从 3 个（deny/ask/allow）扩到 4 个（多了 restrict），而客户端**解码**那一步还在用旧的 3 档表校验：
-
-```js
-nativeGitPolicy: GUARD_COPY.some((entry) => entry.id === section.nativeGitPolicy)
-  ? section.nativeGitPolicy
-  : CATALOG.defaults.nativeGitPolicy,   // restrict 不在旧表里 → 回落成默认 deny
-```
+**根因**：原生 git 的档位从 3 个（deny/ask/allow）扩到 4 个（多了 restrict），而客户端**解码**那一步还在用旧的 3 档表校验。
 
 存进文档的值是对的，**只是显示回落到默认** —— 所以现象像"设置无效"，实际是"读数错了"。
 
@@ -571,6 +573,8 @@ const word = command.slice(start, index)   // → word 为空，index 原地不�
 - **每一轮循环必须保证消费输入**：修复里加了结构性的 `if (index === start) index += 1`，这样以后任何分支忘记前进也不会再冻住宿主；
 - 当循环遍历的是**用户输入**时，先把畸形输入列进测试（`>>>`、`<<<`、`a<>b`、`""`…）；
 - **给测试加超时**（`--test-timeout`）：这一族 bug 表现为"挂住"而不是"失败"，没有超时它就一直是隐形的。
+
+**平台边界**：判别器只在工具名 `bash` 下调用；Windows 上 shell 工具是 `pwsh`，所以原生 git 拦截与命令文本路径启发式在 Windows 上都不生效。
 
 **教训（比 bug 本身更值钱）**：我连续给出了三个错误结论 —— "环境问题""同步日志写冻住事件循环""需要更多采样" —— 而真因是一段**纯逻辑死循环**。我之所以没找到，是因为一直困在**性能/资源**的框架里（同步 I/O、drvfs、内存、杀毒），而没有问最朴素的问题：**这段代码在任何输入下都会返回吗？** 用户的判断（"就是插件""和 bash 有关""日志之前就有"）三次都比我的分析准。
 
@@ -641,7 +645,7 @@ const word = command.slice(start, index)   // → word 为空，index 原地不�
 
 **一般化**：**跨平台的值要按"谁解释它"来验证** —— 同一个字符串交给 shell、git、Node 还是内核，解释规则各不相同，"我这边看着对"证明不了任何事。
 
-**谁守着**：`test/git-catalog.test.mjs` 断言 `NULL_DEVICE` 按平台取值、且强制配置表与它一致；Windows 真机侧本次另用了一份 `verify-nul-device.mjs` 做行为对照（尚未入库）。
+**谁守着**：`test/git-catalog.test.mjs` 断言 `NULL_DEVICE` 按平台取值、且强制配置表与它一致；Windows 真机侧本次另用了一份 `verify-nul-device.mjs` 做行为对照。
 
 ---
 
