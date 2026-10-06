@@ -26,6 +26,7 @@ import {
   reachesProtectedPath,
   hardenArgv,
   invokesGit,
+  isShellScriptTarget,
   lastPathSegment,
   shellQuote,
   validateArgv,
@@ -227,6 +228,9 @@ describe('the native-git matchers differ on purpose', () => {
       'git.exe status',
       'git-credential-store get',
       'xargs git add',
+      '& git status',
+      'Write-Output ready; & git push',
+      'cmd & git status',
     ]) {
       assert.equal(invokesGit(command), true, command + ' must be refused')
     }
@@ -244,9 +248,25 @@ describe('the native-git matchers differ on purpose', () => {
       'cat .gitignore',
       'cd /mnt/d/AIproject/DSHplugins/git-for-dsh',
       'printf %s "git is a vcs"',
+      // A `&` inside a word is not an operator. Refusing a query string because its last
+      // parameter is named `git` is the false positive the restrict tier must not produce.
+      'curl https://host.example/?a=1&git',
+      'curl https://host.example/?a=1&git=2',
+      // Accepted miss, on purpose: `&` glued to a word is not read as an operator, so this
+      // separated form goes undetected. The tier prefers a miss to a false refusal.
+      'echo a&git status',
     ]) {
       assert.equal(invokesGit(command), false, command + ' must be allowed')
     }
+  })
+
+  it('recognizes a PowerShell script as a script', () => {
+    // The write-time script check has to cover the shell Windows actually runs, or it is inert
+    // on the one platform it was written for.
+    assert.equal(isShellScriptTarget('/tmp/probe.ps1', ''), true)
+    assert.equal(isShellScriptTarget('/tmp/probe.psm1', ''), true)
+    assert.equal(isShellScriptTarget('/tmp/probe', '#!/usr/bin/env pwsh\ngit status\n'), true)
+    assert.equal(isShellScriptTarget('/tmp/probe.txt', 'plain text'), false)
   })
 })
 

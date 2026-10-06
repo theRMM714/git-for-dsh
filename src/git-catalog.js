@@ -953,11 +953,15 @@ export const DEFAULT_SSH_COMMAND = process.platform === 'win32'
   ? 'C:/Windows/System32/OpenSSH/ssh.exe'
   : '/usr/bin/ssh'
 
-/** Extensions that name a shell script. */
-const SHELL_SCRIPT_EXTENSIONS = Object.freeze(['.sh', '.bash', '.zsh', '.ksh', '.dash', '.ash'])
+/** Extensions that name a shell script, in either shell family. */
+const SHELL_SCRIPT_EXTENSIONS = Object.freeze(['.sh', '.bash', '.zsh', '.ksh', '.dash', '.ash', '.ps1', '.psm1'])
 
 /**
  * Whether a file being written is a shell script.
+ *
+ * Both shell families count: POSIX scripts by extension or shebang, PowerShell scripts by
+ * extension (`.ps1` / `.psm1`) or by a `pwsh` / `powershell` shebang. Leaving PowerShell out
+ * made this check inert on Windows, which is the one platform it exists for.
  *
  * Judged from the path AND from the content the call already carries — never from disk.
  * The guard runs in the DSH process on every tool call, so a filesystem read there trades
@@ -976,7 +980,7 @@ export function isShellScriptTarget(filePath, content) {
   if (typeof content === 'string') {
     // A shebang identifies a script whatever it is named.
     const firstLine = content.slice(0, 200).split('\n')[0] ?? ''
-    if (/^#!.*\b(sh|bash|zsh|ksh|dash|ash)\b/.test(firstLine)) return true
+    if (/^#!.*\b(sh|bash|zsh|ksh|dash|ash|pwsh|powershell)\b/.test(firstLine)) return true
   }
   return false
 }
@@ -1158,8 +1162,14 @@ function unboundedSteps() {
 /** Characters that end a bare word. */
 const WORD_BREAK = new Set([' ', '\t', '\r', '\n', ';', '&', '|', '(', ')', '{', '}', '`', '$', '"', "'", '<', '>'])
 
-/** Characters after which a command may begin. */
-const COMMAND_START = new Set([';', '&', '|', '(', ')', '{', '}', '`', '$', '\n'])
+/**
+ * Characters after which a command may begin.
+ *
+ * `&` is deliberately absent: it is a command start only when it stands alone as the call
+ * operator or a separator, which {@link isAmpersandOperator} decides. Treating every `&` as
+ * a start made `curl https://host/?a=1&git` look like an invocation.
+ */
+const COMMAND_START = new Set([';', '|', '(', ')', '{', '}', '`', '$', '\n'])
 
 /**
  * Words that put the NEXT word in command position.
@@ -1211,6 +1221,35 @@ function isCommandStringQuote(command, at) {
 }
 
 /**
+ * Whether an `&` opens a command position.
+ *
+ * `&` is the call operator (`& git status`) and a statement separator, so a standalone one has
+ * to count. Counting EVERY `&` is what turns a query string (`curl https://host/?a=1&git`) or a
+ * redirection (`2>&1`) into an apparent invocation. This decides the `restrict` tier, whose
+ * contract is "may miss, must not refuse real work", so only a `&` that is a token of its own
+ * counts.
+ *
+ * @param command - the command text.
+ * @param at - the index of the `&`.
+ * @returns true when this `&` is a standalone operator.
+ */
+function isAmpersandOperator(command, at) {
+  const next = command[at + 1]
+  // `&&` separates commands in both shells, and `&>` is a redirection.
+  if (next === '&') return true
+  if (next === '>') return false
+  // A `&` inside a word (`?a=1&git`, `a&b`) never opens a command position. This is the part
+  // that keeps the matcher from refusing ordinary work; missing `a&git` is the accepted cost.
+  const previous = at === 0 ? '' : command[at - 1]
+  if (previous !== '' && !' \t\r\n;|({'.includes(previous)) return false
+  // `2>&1`: the `&` belongs to the redirection in front of it, whatever the spacing.
+  let before = at - 1
+  while (before >= 0 && ' \t\r\n'.includes(command[before])) before -= 1
+  if (before >= 0 && (command[before] === '>' || command[before] === '<')) return false
+  return true
+}
+
+/**
  * Whether a shell command INVOKES git, judged by command position rather than by the
  * presence of the word.
  *
@@ -1245,6 +1284,16 @@ export function invokesGit(command, spend = unboundedSteps) {
       continue
     }
     if (ch === ' ' || ch === '\t' || ch === '\r') {
+      index += 1
+      continue
+    }
+    /*
+     * `&` needs its own branch because COMMAND_START no longer holds it: left to the word scan
+     * it would break a zero-length word and be consumed by the safety branch below, which never
+     * opens a command position — losing `cmd & git` while still counting nothing extra.
+     */
+    if (ch === '&') {
+      if (isAmpersandOperator(command, index)) atCommandStart = true
       index += 1
       continue
     }

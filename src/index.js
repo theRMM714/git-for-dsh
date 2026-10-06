@@ -76,6 +76,17 @@ import { isAbsolute, resolve as resolvePath } from 'node:path'
 export const name = 'tool-git'
 
 /**
+ * The shell tools whose COMMAND TEXT the guard judges.
+ *
+ * The guard's two halves reach differently, and the difference is deliberate: the
+ * path-argument half (`file_path` / `path`, `git_exec`'s own operands, and the write-time
+ * script check) is tool-agnostic, while this half needs a command string and therefore
+ * names the tools that carry one. Windows runs `pwsh` and POSIX runs `bash`; covering only
+ * one of them is how a guard silently becomes a no-op on a whole platform.
+ */
+const SHELL_COMMAND_TOOLS = new Set(['bash', 'pwsh'])
+
+/**
  * Hard dependencies.
  *
  * `settings` is NOT declared: it is reached through an optional child scope and
@@ -1188,7 +1199,7 @@ export function inspectToolCall(execution, current, cache) {
   const session = execution.agent == null ? undefined : execution.agent.session
   const cwd = session == null ? process.cwd() : session.header.cwd
 
-  if (execution.name === 'bash') {
+  if (SHELL_COMMAND_TOOLS.has(execution.name)) {
     const command = typeof args.command === 'string' ? args.command : ''
     /*
      * Where the command runs is a tool argument of its own, and the command text never names
@@ -1201,7 +1212,7 @@ export function inspectToolCall(execution, current, cache) {
       const decision = rowDecision(
         workdirRow,
         bashAccessKind(command, current.bashPathMode ?? DEFAULT_BASH_PATH_MODE),
-        `bash 的工作目录「${bashWorkdir}」在`,
+        `${execution.name} 的工作目录「${bashWorkdir}」在`,
       )
       if (decision !== undefined) return decision
     }
@@ -1235,10 +1246,10 @@ export function inspectToolCall(execution, current, cache) {
       if (matched) {
         return guardDecision(
           current.nativeGitPolicy === 'ask' ? 'ask' : 'deny',
-          'bash 里的原生 git 已被本插件拦截（当前策略：'
+          `${execution.name} 里的原生 git 已被本插件拦截（当前策略：`
             + current.nativeGitPolicy
             + (narrow ? '，只在命令位置判定' : '，出现 git 调用即判定')
-            + '）。请改用 git_exec：它有允许清单、参数闸门、配置审计与逐次审批，bash 里的 git 会绕过全部这些闸门。'
+            + `）。请改用 git_exec：它有允许清单、参数闸门、配置审计与逐次审批，${execution.name} 里的 git 会绕过全部这些闸门。`
             + (current.nativeGitPolicy === 'ask' ? '（若确实需要，请在审批中确认。）' : ''),
         )
       }
@@ -1854,12 +1865,12 @@ function setup(ctx, config = {}) {
     flight.tool = execution.name
     flight.startedAt = startedAt
     /*
-     * A bash call is identified by what it runs. Without this the log says `tool=bash`
+     * A shell call is identified by what it runs. Without this the log says `tool=bash`
      * and nothing more, which cannot tell a build from a tail — and the freeze reports all
-     * landed on bash calls, so the distinction is the whole question.
+     * landed on shell calls, so the distinction is the whole question.
      */
     const callArgs = execution.arguments
-    const commandPrefix = execution.name === 'bash'
+    const commandPrefix = SHELL_COMMAND_TOOLS.has(execution.name)
       && callArgs !== null && typeof callArgs === 'object' && typeof callArgs.command === 'string'
       ? JSON.stringify(callArgs.command.slice(0, 60))
       : undefined

@@ -866,6 +866,16 @@ describe('the ruling logic is callable on its own', () => {
     assert.match(verdict.reason, /路径权限/)
   })
 
+  it('judges the same command text when the shell tool is pwsh', () => {
+    // Windows runs `pwsh`. A guard that names only `bash` is inert on a whole platform, and the
+    // refusal has to name the tool the caller actually used.
+    const denying = { ...policy, nativeGitPolicy: 'deny' }
+    const verdict = inspectToolCall(pending('pwsh', { command: 'git status' }), denying, cache())
+    assert.equal(verdict.kind, 'deny')
+    assert.match(verdict.reason, /pwsh/)
+    assert.equal(inspectToolCall(pending('pwsh', { command: 'Get-ChildItem' }), denying, cache()), undefined)
+  })
+
   it('leaves an unrelated call alone', () => {
     assert.equal(inspectToolCall(pending('read', { file_path: '/tmp/anything.txt' }), policy, cache()), undefined)
   })

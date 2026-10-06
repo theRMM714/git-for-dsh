@@ -331,6 +331,19 @@ describe('client bundle: loading', () => {
     assert.doesNotThrow(() => add[0].props.onClick())
   })
 
+  it('renders the built-in protection rows when the stored section carries none', () => {
+    // The section always carries the Host schema's default for `pathRules`, which is `[]`
+    // ("the operator has added none of their own yet"), while the built-in rows exist only in
+    // the client decoder. Rendering the raw section showed an empty table, and the tests that
+    // only exercised `decodeSection` could not see it.
+    const page = renderPage(activate().calls)
+    const rows = collect(page, (element) => element.props?.className === 'git-tool-rulePath')
+    const paths = rows.map((element) => (element.children ?? []).join(''))
+    assert.ok(paths.includes('~/.git-credentials'), 'the credential row renders')
+    assert.ok(paths.includes('~/.gitconfig'), 'the gitconfig row renders')
+    assert.ok(paths.length >= 5, `every built-in row renders (saw ${paths.length})`)
+  })
+
   it('offers the configuration health and its reset', () => {
     const page = renderPage(activate().calls)
     const text = JSON.stringify(page)
