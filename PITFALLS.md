@@ -737,5 +737,18 @@ git status could not start: ctx.shell.run is not a function
 
 **谁守着**：`test/host.test.mjs` 的 `canCreateResolvableLink` 与两条链接用例的 skip 理由。
 
+## 43. 只在完全权限下验收 —— 受限会话里 `npm test` 的默认按文件隔离会 EPERM
+
+**现象**：`npm test` 在受限会话里 7 个测试文件**全部** red，每个只报一句 `test at <file>:1:1 — Error: spawn EPERM`；同一条命令在 `danger-full-access` 下却全绿。
+
+**根因**：node 测试运行器默认**按文件隔离**，每个文件起一个**带管道 stdio** 的子进程，而受限沙箱不允许管道（与条目 42 同一家族的限制）。完全权限下这层限制不存在，于是「我刚跑过，是绿的」是个假象 —— 验收环境的权限比使用环境宽，等于没验收。
+
+**怎么判**：失败形态是「每个测试文件各一条 `spawn EPERM`，且一条断言都没跑到」（`tests` 数等于文件数、`pass 0`）。在命令后加 `--test-isolation=none` 立刻全绿，就是它。
+
+**怎么避**：`npm test` 固定带 `--test-isolation=none`（本套件内部不需要文件级隔离）；**在受限会话里验收**，别只在不受限时跑。
+
+**谁守着**：`package.json` 的 `test` 脚本本身。
+
+
 
 
