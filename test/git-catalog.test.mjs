@@ -13,6 +13,7 @@ import { describe, it } from 'node:test'
 import {
   DEFAULT_ENABLED,
   ENFORCED_CONFIG,
+  NULL_DEVICE,
   OPERATION_NAMES,
   RISK,
   buildEnv,
@@ -509,7 +510,7 @@ describe('enforced configuration pins the program-naming keys', () => {
     // `core.gitProxy` names a program for transport.
     assert.equal(pinned.get('core.fsmonitor'), 'false')
     assert.equal(pinned.get('core.gitProxy'), 'false')
-    assert.equal(pinned.get('core.hooksPath'), '/dev/null')
+    assert.equal(pinned.get('core.hooksPath'), NULL_DEVICE)
     assert.equal(pinned.get('core.pager'), 'cat')
     assert.equal(pinned.get('credential.helper'), '')
   })
@@ -538,7 +539,9 @@ describe('enforced configuration pins the program-naming keys', () => {
     assert.equal(env.GIT_SSH_COMMAND, '/opt/ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new')
     assert.equal(ENFORCED_CONFIG.some((pair) => pair.key === 'core.sshCommand'), false)
     // A blank setting falls back rather than pinning an empty program.
-    assert.match(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, /^\/usr\/bin\/ssh -o BatchMode=yes/)
+    // Blank falls back to the SAME program the default picks on this platform, which is the
+    // property that matters: the setting must not pin an empty program.
+    assert.equal(buildEnv({ sshCommand: '   ' }).GIT_SSH_COMMAND, buildEnv({}).GIT_SSH_COMMAND)
     // A path the shell would otherwise reinterpret must reach git as written: inside double
     // quotes a $ or a backtick is still expanded, which is why the shared rule single-quotes.
     assert.match(
@@ -681,14 +684,14 @@ describe('buildEnv', () => {
       pairs.set(env[`GIT_CONFIG_KEY_${index}`], env[`GIT_CONFIG_VALUE_${index}`])
     }
     assert.equal(pairs.get('core.pager'), 'cat')
-    assert.equal(pairs.get('core.hooksPath'), '/dev/null')
+    assert.equal(pairs.get('core.hooksPath'), NULL_DEVICE)
     assert.equal(pairs.get('credential.helper'), '')
   })
 
   it('hides the user and system configuration by default', () => {
     const env = buildEnv()
-    assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null')
-    assert.equal(env.GIT_CONFIG_SYSTEM, '/dev/null')
+    assert.equal(env.GIT_CONFIG_GLOBAL, NULL_DEVICE)
+    assert.equal(env.GIT_CONFIG_SYSTEM, NULL_DEVICE)
   })
 
   it('always hides the user and system configuration', () => {
@@ -696,8 +699,8 @@ describe('buildEnv', () => {
     // way, and reading ~/.gitconfig would make behaviour depend on a file outside
     // the repository while exposing whatever it holds.
     const env = buildEnv()
-    assert.equal(env.GIT_CONFIG_GLOBAL, '/dev/null')
-    assert.equal(env.GIT_CONFIG_SYSTEM, '/dev/null')
+    assert.equal(env.GIT_CONFIG_GLOBAL, NULL_DEVICE)
+    assert.equal(env.GIT_CONFIG_SYSTEM, NULL_DEVICE)
   })
 
   it('never prompts or pager-waits', () => {
@@ -713,7 +716,10 @@ describe('command composition', () => {
   it('quotes tokens that need it', () => {
     assert.equal(shellQuote('status'), 'status')
     assert.equal(shellQuote('fix: typo'), "'fix: typo'")
-    assert.equal(shellQuote("it's"), `'it'\\''s'`)
+    // Both dialects are asserted by name: they differ only for an embedded apostrophe, and
+    // relying on the platform default here tested the platform, not the quoting.
+    assert.equal(shellQuote("it's", 'sh'), `'it'\\''s'`)
+    assert.equal(shellQuote("it's", 'pwsh'), `'it''s'`)
     assert.equal(shellQuote(''), "''")
     assert.equal(shellQuote('--oneline'), '--oneline')
     assert.equal(shellQuote('src/a b.js'), "'src/a b.js'")

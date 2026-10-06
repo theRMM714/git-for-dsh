@@ -9,8 +9,8 @@
  */
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { createDiagnosticLog, defaultLogPath, formatValue } from '../src/log.js'
 
@@ -159,10 +159,13 @@ describe('two gates, one file', () => {
 })
 
 describe('the default destination', () => {
-  it('sits beside the harness state, not on a Windows drive', () => {
+  it('sits beside the harness state', () => {
     // This file is written synchronously once per tool call, so where it lives is a
-    // performance decision, not a cosmetic one.
+    // performance decision, not a cosmetic one: it is the harness home, which is $DSH_HOME
+    // when set and ~/.dsh otherwise.
+    const home = process.env.DSH_HOME
+    const expected = home !== undefined && home.length > 0 ? home : join(homedir(), '.dsh')
     assert.match(defaultLogPath(), /tool-git\.log$/)
-    assert.ok(defaultLogPath().startsWith('/'))
+    assert.equal(dirname(defaultLogPath()), resolve(expected))
   })
 })

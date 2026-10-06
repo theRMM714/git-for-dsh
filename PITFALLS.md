@@ -689,3 +689,28 @@ git status could not start: ctx.shell.run is not a function
 
 **谁守着**：`test/client.test.mjs` 的 "renders the built-in protection rows when the stored section carries none" —— 它断言渲染出的行里包含内置路径，而不是只断言解码结果。
 
+## 39. 前缀比较写死了 `/` —— Windows 上「点名受保护文件的目录」不设防
+
+**现象**：把受保护文件的**父目录**当路径参数传进来（`grep` 的 `path`、`read` 的目录参数）没有被拒。点名文件本身会被拒，所以闸门看起来是好的。
+
+**根因**：`reachesProtectedPath` 的祖先分支用 `protectedPath.startsWith(candidate + '/')` 判断，而前缀里的分隔符是**硬编码的 `/`**；守卫先用 `path.resolve` 解析参数，Windows 上两侧都是反斜杠，`startsWith` 永不成立。同文件的 `isPathInside` 本来就按 `[\\/]` 分段、Windows 忽略大小写 —— 两条判断对同一对路径给出相反答案，缺陷就在这个不一致里。
+
+**怎么判**：拿一个真实存在的受保护文件（例如 `~/.gitconfig`），先点名文件本身（必须被拒），再把它的父目录作为 `grep` 的 `path` 传进去。父目录也必须是 `deny`；在 Windows 上它会是 `delegated`。
+
+**怎么避**：容器判断一律用共享的 `isPathInside(protectedPath, candidate)`，任何一个分支都不要自己拼分隔符。
+
+**谁守着**：`test/host.test.mjs` 的 "refuses a protected file, and a directory that contains it" —— 它断言的正是这一条，因此在修好之前它是红的。
+
+## 40. `--out` 用 `new URL()` 解析参数 —— Windows 上绝对路径必坏
+
+**现象**：`node scripts/build.mjs --out D:\some\dir` 抛 `ERR_INVALID_URL_SCHEME`；改用 `file:` URL 传就正常 —— 绕过它等于把这个缺陷藏起来。
+
+**根因**：解析参数用的是 `new URL(arg, file://<cwd>/)`。`D:\some\dir` 在 URL 语法里被当成 scheme 为 `d:` 的 URL，`fileURLToPath` 随即抛错。
+
+**怎么判**：在 Windows 上用普通路径跑一次 `--out`。
+
+**怎么避**：先判断参数是不是 `file:` URL，不是就按普通路径 `resolve()`；验证脚本按**普通路径**传参，这样这条路径始终被覆盖。
+
+**谁守着**：`scripts/verify-artifacts.mjs`（按普通路径调 `--out`）与 `test/artifacts.test.mjs`。
+
+

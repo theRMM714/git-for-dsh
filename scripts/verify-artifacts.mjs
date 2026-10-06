@@ -33,11 +33,16 @@ const check = (label, condition, detail) => {
 rmSync(scratch, { recursive: true, force: true })
 mkdirSync(scratch, { recursive: true })
 
-const build = spawnSync(process.execPath, [`${root}scripts/build.mjs`, '--out', `${scratch}`], {
+// `--out` travels as a plain path so that form stays covered: it used to break on Windows,
+// where an absolute path reached `new URL(...)` and parsed as a URL whose scheme is the drive
+// letter. The build now accepts a path or a `file:` URL.
+const build = spawnSync(process.execPath, [`${root}scripts/build.mjs`, '--out', scratch], {
   cwd: root,
-  encoding: 'utf8',
+  // `inherit`, NOT the default pipe: a confined sandbox denies the pipe a captured child needs,
+  // so the status came back null and every artifact then looked out of date.
+  stdio: 'inherit',
 })
-check('a fresh build succeeds', build.status === 0, (build.stderr ?? '').trim().split('\n').slice(-1)[0])
+check('a fresh build succeeds', build.status === 0, build.status === null ? 'the build process could not be started' : 'see the build output above')
 
 for (const artifact of ARTIFACTS) {
   if (!existsSync(`${lib}${artifact}`)) {

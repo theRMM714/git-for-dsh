@@ -177,7 +177,7 @@ window.__ModuleLoader__.load({
         { id: 'ask', label: '询问我', hint: '守卫出错时先问你，由你决定这一次放不放行。默认：缺陷不会静默。' },
         { id: 'allow', label: '静默放行', hint: '守卫出错时照旧放行，只写一行诊断日志 —— 适合你已知道并接受某个缺陷时。' },
       ]
-      const BASH_MODE_COPY = [
+      const SHELL_MODE_COPY = [
         { id: 'heuristic', label: '启发式', hint: '明显的读命令按读算，明显的写命令按写算，其余一律按写算（保守兜底）。' },
         { id: 'write-only', label: '一律按写', hint: '任何提到该路径的命令都按写算，所以读一个只勾了「读」的文件也会被拒。' },
       ]
@@ -379,7 +379,7 @@ window.__ModuleLoader__.load({
           targetPaths: [...(CATALOG.defaults.targetPaths ?? [])],
           sshCommand: CATALOG.defaults.sshCommand,
           pathRules: builtinRows(CATALOG.defaults.protectionRows),
-          bashPathMode: CATALOG.defaults.bashPathMode ?? 'heuristic',
+          shellPathMode: CATALOG.defaults.shellPathMode ?? 'heuristic',
           proxyPort: CATALOG.defaults.proxyPort,
           proxyCommand: CATALOG.defaults.proxyCommand,
         }
@@ -435,9 +435,9 @@ window.__ModuleLoader__.load({
               builtin: isBuiltinRow(row.path),
             }))
             : builtinRows(CATALOG.defaults.protectionRows),
-          bashPathMode: isKnownTier('bashPathMode', section.bashPathMode, BASH_MODE_COPY)
-            ? section.bashPathMode
-            : (CATALOG.defaults.bashPathMode ?? 'heuristic'),
+          shellPathMode: isKnownTier('shellPathMode', section.shellPathMode, SHELL_MODE_COPY)
+            ? section.shellPathMode
+            : (CATALOG.defaults.shellPathMode ?? 'heuristic'),
           proxyPort: Number.isInteger(section.proxyPort) && section.proxyPort >= 0 && section.proxyPort <= 65535
             ? section.proxyPort
             : CATALOG.defaults.proxyPort,
@@ -1106,7 +1106,7 @@ window.__ModuleLoader__.load({
               ),
               row(
                 'shell 里的路径判定',
-                segmented('bashPathMode', 'bashPathMode', BASH_MODE_COPY, value.bashPathMode ?? CATALOG.defaults.bashPathMode),
+                segmented('shellPathMode', 'shellPathMode', SHELL_MODE_COPY, value.shellPathMode ?? CATALOG.defaults.shellPathMode),
                 '守卫只能看命令文本（bash 与 pwsh 都看），所以这一层本质是启发式：明显读按读、明显写按写、其余按写。',
               ),
               row(

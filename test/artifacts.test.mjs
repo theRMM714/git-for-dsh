@@ -19,12 +19,15 @@ describe('committed artifacts', () => {
   it('are exactly what the sources build', () => {
     const result = spawnSync(process.execPath, [`${root}scripts/verify-artifacts.mjs`], {
       cwd: root,
-      encoding: 'utf8',
+      // `inherit`, NOT the default pipe: a confined sandbox denies the pipe a captured child
+      // needs, so the status came back null and every artifact looked stale. The verifier's
+      // own output stays visible in this process either way.
+      stdio: 'inherit',
     })
     assert.equal(
       result.status,
       0,
-      `lib/ is out of date with src/; run "node scripts/build.mjs" and commit lib/\n${result.stdout ?? ''}`,
+      'lib/ is out of date with src/; run "node scripts/build.mjs" and commit lib/',
     )
   })
 

@@ -10,16 +10,16 @@
  * @module git-for-dsh/test/host.test
  */
 import assert from 'node:assert/strict'
-import { symlinkSync, utimesSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { symlinkSync, utimesSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { after, describe, it } from 'node:test'
 import { apply, applyUnguarded, Config, DEFAULT_CONFIG, inject as pluginInject } from '../src/index.js'
 import { fileStamp } from '../src/index.js'
 import { retiredKeys, guardFailureVerdict, inspectToolCall } from '../src/index.js'
-import { CONFIG_AUDIT_COMMAND } from '../src/git-catalog.js'
+import { CONFIG_AUDIT_COMMAND, NULL_DEVICE } from '../src/git-catalog.js'
 import { SHELL_SEAM } from '../src/shell-driver.js'
 import { ROUTES } from '../src/routes.js'
 
@@ -420,7 +420,7 @@ describe('host plugin: the allowlist gate', () => {
     // call that left workdir unset would run in the wrong repository.
     const { definition, recorded } = mount()
     await definition.execute({ ...CALL, argv: ['status'] }, execution({ session: { header: { cwd: '/session/workspace' } } }))
-    assert.equal(executed(recorded)[0].workdir, '/session/workspace')
+    assert.equal(executed(recorded)[0].workdir, resolve('/session/workspace'))
   })
 
   it('omits workdir entirely when neither the call nor the session supplies one', async () => {
@@ -433,14 +433,14 @@ describe('host plugin: the allowlist gate', () => {
   it('honours an explicit workdir over the session default', async () => {
     const { definition, recorded } = mount()
     await definition.execute({ ...CALL, argv: ['status'], workdir: '/elsewhere/repo' }, execution())
-    assert.equal(executed(recorded)[0].workdir, '/elsewhere/repo')
+    assert.equal(executed(recorded)[0].workdir, resolve('/elsewhere/repo'))
   })
 
   it('passes the hardened environment through to the run', async () => {
     const { definition, recorded } = mount()
     await definition.execute({ ...CALL, argv: ['status'] }, execution())
     assert.equal(executed(recorded)[0].env.GIT_TERMINAL_PROMPT, '0')
-    assert.equal(executed(recorded)[0].env.GIT_CONFIG_GLOBAL, '/dev/null')
+    assert.equal(executed(recorded)[0].env.GIT_CONFIG_GLOBAL, NULL_DEVICE)
     assert.ok(executed(recorded)[0].env.GIT_CONFIG_COUNT)
   })
 
@@ -677,23 +677,74 @@ describe('host plugin: the target scope', () => {
   })
 })
 
+/**
+ * Whether this environment can create a link that `realpathSync` resolves to its target.
+ *
+ * Windows reserves file and directory symlinks for elevated or developer-mode processes, and a
+ * confined sandbox may refuse them outright (EPERM). A junction needs no privilege, but Node's
+ * `realpathSync` does not resolve one here, so it cannot stand in when the assertion is exactly
+ * that a link and its target agree. The two cases below skip with this reason rather than assert
+ * something weaker.
+ *
+ * @param kind - `file` or `directory`.
+ * @returns true when a resolvable link was created, checked and removed again.
+ */
+function canCreateResolvableLink(kind) {
+  const dir = mkdtempSync(join(tmpdir(), `git-tool-link-${kind}-`))
+  try {
+    const target = join(dir, 'target')
+    const link = join(dir, 'link')
+    if (kind === 'file') {
+      writeFileSync(target, 'x')
+      symlinkSync(target, link)
+    } else {
+      mkdirSync(target, { recursive: true })
+      try {
+        symlinkSync(target, link, 'dir')
+      } catch {
+        symlinkSync(target, link, 'junction')
+      }
+    }
+    return realpathSync(link) === realpathSync(target)
+  } catch {
+    return false
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/** The reason the two link cases below skip when this environment cannot supply the link. */
+const LINK_UNAVAILABLE =
+  'this environment forbids creating a link that realpathSync resolves (a symlink needs privilege on Windows and is refused with EPERM here; a junction is created but is not resolved by realpathSync)'
+
+const FILE_LINKS = canCreateResolvableLink('file')
+const DIRECTORY_LINKS = canCreateResolvableLink('directory')
+
 describe('host plugin: the target is resolved once', () => {
-  it('hands the shell the directory the rules judged', async () => {
+  it('hands the shell the directory the rules judged', { skip: DIRECTORY_LINKS ? false : LINK_UNAVAILABLE }, async () => {
     // A link and its target must not be two different answers: the rules resolve, so the
     // execution must resolve too, or a swap between them changes where git runs.
     const root = mkdtempSync(join(tmpdir(), 'git-tool-resolve-'))
-    const real = join(root, 'real')
-    const link = join(root, 'link')
-    mkdirSync(real, { recursive: true })
-    symlinkSync(real, link)
+    try {
+      const real = join(root, 'real')
+      const link = join(root, 'link')
+      mkdirSync(real, { recursive: true })
+      try {
+        symlinkSync(real, link, 'dir')
+      } catch {
+        symlinkSync(real, link, 'junction')
+      }
 
-    const { definition, recorded } = mount({ settings: { ...DEFAULT_CONFIG, logEnabled: false, heartbeat: false, targetScope: 'unrestricted' } })
-    await definition.execute({ ...CALL, argv: ['status'], workdir: link }, execution())
-    // The shell must be handed the RESOLVED directory, so a swap between the judgement and the
-    // spawn cannot point it somewhere the rules never saw.
-    const handed = JSON.stringify(recorded.runs)
-    assert.ok(handed.includes(real), 'the resolved directory reaches the shell')
-    assert.ok(!handed.includes(link), 'the link itself is not what git is told to use')
+      const { definition, recorded } = mount({ settings: { ...DEFAULT_CONFIG, logEnabled: false, heartbeat: false, targetScope: 'unrestricted' } })
+      await definition.execute({ ...CALL, argv: ['status'], workdir: link }, execution())
+      // The shell must be handed the RESOLVED directory, so a swap between the judgement and the
+      // spawn cannot point it somewhere the rules never saw.
+      const handed = JSON.stringify(recorded.runs)
+      assert.ok(handed.includes(real), 'the resolved directory reaches the shell')
+      assert.ok(!handed.includes(link), 'the link itself is not what git is told to use')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 
@@ -735,7 +786,7 @@ describe('host plugin: the configuration health', () => {
     // in this schema is a leftover from a setting this plugin no longer has.
     const descriptor = (user) => ({ describe: () => [{ ns: 'tool-git', user }] })
     assert.deepEqual(retiredKeys(descriptor({ pathRules: [], retiredThing: 1 })), ['retiredThing'])
-    assert.deepEqual(retiredKeys(descriptor({ pathRules: [], bashPathMode: 'heuristic' })), [])
+    assert.deepEqual(retiredKeys(descriptor({ pathRules: [], shellPathMode: 'heuristic' })), [])
     assert.deepEqual(retiredKeys(descriptor({ a: 1, b: 2 })), ['a', 'b'], 'sorted, so the list is stable')
   })
 
@@ -752,25 +803,38 @@ describe('host plugin: the configuration health', () => {
 
 describe('host plugin: the audit stamp', () => {
   it('tells two files of the same shape apart', () => {
-    // The hole: a symlink swapped to a file with the same size and mtime left the cached
-    // verdict describing the PREVIOUS file, and that verdict is what decides whether a
-    // repository configuration is dangerous.
+    // The hole: a path swapped to a file with the same size and mtime left the cached verdict
+    // describing the PREVIOUS file, and that verdict is what decides whether a repository
+    // configuration is dangerous.
     const dir = mkdtempSync(join(tmpdir(), 'git-tool-stamp-'))
-    const a = join(dir, 'a')
-    const b = join(dir, 'b')
-    writeFileSync(a, 'core.pager=evil')
-    writeFileSync(b, 'core.pager=nice')
-    const when = new Date(1_600_000_000_000)
-    utimesSync(a, when, when)
-    utimesSync(b, when, when)
-    assert.notEqual(fileStamp(a), fileStamp(b), 'same size and mtime, different file')
+    try {
+      const a = join(dir, 'a')
+      const b = join(dir, 'b')
+      writeFileSync(a, 'core.pager=evil')
+      writeFileSync(b, 'core.pager=nice')
+      const when = new Date(1_600_000_000_000)
+      utimesSync(a, when, when)
+      utimesSync(b, when, when)
+      assert.notEqual(fileStamp(a), fileStamp(b), 'same size and mtime, different file')
+      assert.equal(fileStamp(join(dir, 'missing')), undefined)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 
-    // A symlink and its target are the same file, so they agree.
-    const link = join(dir, 'link')
-    symlinkSync(a, link)
-    assert.equal(fileStamp(link), fileStamp(a))
-
-    assert.equal(fileStamp(join(dir, 'missing')), undefined)
+  it('treats a link and its target as the same file', { skip: FILE_LINKS ? false : LINK_UNAVAILABLE }, () => {
+    // The same staleness hole from the other side: a link and its target are one file, so their
+    // stamps must agree.
+    const dir = mkdtempSync(join(tmpdir(), 'git-tool-stamp-link-'))
+    try {
+      const a = join(dir, 'a')
+      const link = join(dir, 'link')
+      writeFileSync(a, 'core.pager=evil')
+      symlinkSync(a, link)
+      assert.equal(fileStamp(link), fileStamp(a))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -800,7 +864,7 @@ describe('the ruling logic is callable on its own', () => {
    */
   const policy = {
     pathRules: [{ path: '/home/me/private', read: true, write: false, ask: false }],
-    bashPathMode: 'heuristic',
+    shellPathMode: 'heuristic',
     scriptCheckPolicy: 'restrict',
     nativeGitPolicy: 'ask',
     targetScope: 'unrestricted',
@@ -1046,7 +1110,7 @@ describe('host plugin: the tool guard', () => {
     const readOnly = mount({
       settings: settingsWith({
         pathRules: [{ path: '~/.gitconfig', read: true, write: false, ask: false }],
-        bashPathMode: 'heuristic',
+        shellPathMode: 'heuristic',
       }),
     })
     assert.equal(
@@ -1057,7 +1121,7 @@ describe('host plugin: the tool guard', () => {
     const writeOnly = mount({
       settings: settingsWith({
         pathRules: [{ path: '~/.gitconfig', read: true, write: false, ask: false }],
-        bashPathMode: 'write-only',
+        shellPathMode: 'write-only',
       }),
     })
     assert.equal(

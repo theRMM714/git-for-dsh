@@ -599,7 +599,7 @@ describe('client bundle: activation', () => {
       // The field the decoder used to drop: a stored `allow` then rendered as `ask`.
       guardErrorPolicy: 'allow',
       pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
-      bashPathMode: 'write-only',
+      shellPathMode: 'write-only',
       scriptCheckPolicy: 'restrict',
       targetScope: 'allowlist',
       targetPaths: ['/work'],
@@ -619,7 +619,7 @@ describe('client bundle: activation', () => {
       nativeGitPolicy: 'ask',
       guardErrorPolicy: 'allow',
       pathRules: [{ path: '/x', read: true, write: false, ask: true, builtin: false }],
-      bashPathMode: 'write-only',
+      shellPathMode: 'write-only',
       scriptCheckPolicy: 'restrict',
       targetScope: 'allowlist',
       targetPaths: ['/work'],

@@ -28,6 +28,7 @@
  */
 import { createHash } from 'node:crypto'
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   DEFAULT_CONFIG_POLICY,
@@ -42,10 +43,10 @@ import {
   CONFIG_POLICIES,
   SCRIPT_CHECK_POLICIES,
   TARGET_SCOPES,
-  BASH_PATH_MODES,
+  SHELL_PATH_MODES,
   GUARD_ERROR_POLICIES,
   DEFAULT_GUARD_ERROR_POLICY,
-  DEFAULT_BASH_PATH_MODE,
+  DEFAULT_SHELL_PATH_MODE,
   describeCatalog,
 } from '../src/git-catalog.js'
 import { ROUTES } from '../src/routes.js'
@@ -58,10 +59,21 @@ const root = fileURLToPath(new URL('..', import.meta.url))
  * `--out <dir>` exists so a verifier can rebuild into a temp directory and compare
  * against the committed `lib/` without touching it.
  */
+/**
+ * Resolve an `--out` argument to a directory path with a trailing separator.
+ *
+ * Accepts a plain path or a `file:` URL. A plain absolute Windows path must NOT go
+ * through `new URL`: `D:\\out` parses as the scheme `d:`, and `fileURLToPath` then throws
+ * ERR_INVALID_URL_SCHEME — which broke every `--out` call that used a normal path.
+ */
+const outDirectory = (value) => {
+  const directory = value.startsWith('file:') ? fileURLToPath(value) : resolve(value)
+  return directory.endsWith(sep) ? directory : `${directory}${sep}`
+}
 const outIndex = process.argv.indexOf('--out')
 const lib = outIndex === -1
   ? fileURLToPath(new URL('../lib/', import.meta.url))
-  : fileURLToPath(new URL(process.argv[outIndex + 1].replace(/\/?$/, '/'), `file://${process.cwd()}/`))
+  : outDirectory(process.argv[outIndex + 1])
 mkdirSync(lib, { recursive: true })
 
 /** The token `src/client.js` carries where the embedded catalog belongs. */
@@ -152,12 +164,12 @@ export function serializeCatalog() {
         config: [...CONFIG_POLICIES],
         scriptCheck: [...SCRIPT_CHECK_POLICIES],
         targetScope: [...TARGET_SCOPES],
-        bashPathMode: [...BASH_PATH_MODES],
+        shellPathMode: [...SHELL_PATH_MODES],
         guardError: [...GUARD_ERROR_POLICIES],
       },
       scriptCheckPolicy: DEFAULT_SCRIPT_CHECK_POLICY,
       protectionRows: DEFAULT_PROTECTION_ROWS.map((row) => ({ ...row })),
-      bashPathMode: DEFAULT_BASH_PATH_MODE,
+      shellPathMode: DEFAULT_SHELL_PATH_MODE,
       targetScope: DEFAULT_TARGET_SCOPE,
       targetPaths: [],
       heartbeat: false,
